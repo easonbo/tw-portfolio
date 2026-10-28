@@ -131,7 +131,7 @@ label.chk input{width:auto;margin:0}
       </div>
       <div class="rangesum" id="cumSummary"></div>
       <div class="legend" id="cumLegend">
-        <button type="button" data-s="p" aria-pressed="true"><i style="background:var(--s1)"></i>我的持股（時間加權，從第一筆交易起算）</button>
+        <button type="button" data-s="p" aria-pressed="true"><i style="background:var(--s1)"></i><span id="legendP">我的持股</span></button>
         <button type="button" data-s="t" aria-pressed="true"><i style="background:var(--s2)"></i>加權指數</button>
         <button type="button" data-s="o" aria-pressed="true"><i style="background:var(--s3)"></i>櫃買指數</button>
         <span class="hint">點選可隱藏／顯示</span>
@@ -196,8 +196,9 @@ label.chk input{width:auto;margin:0}
   <!-- 設定 -->
   <section data-p="settings" class="hidden">
     <div class="card">
-      <h2>手續費與稅率</h2>
+      <h2>績效與費用設定</h2>
       <form class="trade" id="setForm">
+        <label>績效起算日（空白 = 第一筆交易）<input name="trackFrom" type="date"></label>
         <label>手續費折數（1 = 不打折，0.28 = 2.8 折）<input name="discount" type="number" step="0.01" min="0" max="1"></label>
         <label>最低手續費（元）<input name="minFee" type="number" step="1" min="0"></label>
         <label>股票證交稅<input name="stockTax" type="number" step="0.0001"></label>
@@ -208,6 +209,7 @@ label.chk input{width:auto;margin:0}
         <label>融資成數・上櫃<input name="ratioTPEx" type="number" step="0.1" min="0" max="1"></label>
         <div><button class="btn primary" type="submit">儲存</button></div>
       </form>
+      <p class="hint">績效起算日：這天之前的持股當作期初持股，以前一個交易日收盤為起點，累積損益、報酬率、每日損益都從這天開始算；均價與未實現/已實現損益仍以實際成本計算。</p>
       <p class="hint">手續費 = 成交金額 × 0.1425% × 折數（無條件捨去，不足最低收最低）；證交稅只在賣出收取。代號 00 開頭視為 ETF，00 開頭且 B 結尾視為債券 ETF。個別交易填了手續費/稅就以你填的為準。</p>
       <p class="hint">融資：融資金額 = 成交金額 × 成數，千元以下捨去；利息 = 融資金額 × 年利率 × 日曆天數 ÷ 365，每天估算計入損益，償還當天以實際利息校正（融資賣出時可填對帳單上的利息）。擔保維持率 = 融資股票市值 ÷ 融資餘額。</p>
     </div>
@@ -233,7 +235,7 @@ label.chk input{width:auto;margin:0}
 "use strict";
 // ============================================================ 狀態
 const LS_TRADES = "twp_trades_v1", LS_SET = "twp_settings_v1", LS_THEME = "twp_theme";
-const DEFAULT_SET = { discount: 1, minFee: 20, stockTax: 0.003, etfTax: 0.001, bondEtfTax: 0, marginRate: 0.065, ratioTWSE: 0.6, ratioTPEx: 0.5 };
+const DEFAULT_SET = { trackFrom: "", discount: 1, minFee: 20, stockTax: 0.003, etfTax: 0.001, bondEtfTax: 0, marginRate: 0.065, ratioTWSE: 0.6, ratioTPEx: 0.5 };
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { alert("無法寫入瀏覽器儲存空間：" + e.message); } }
@@ -395,12 +397,14 @@ function compute() {
     const pnl = eq - prevEq - flow;
     const denom = prevEq + buyOwn;
     const ret = denom > 0 ? pnl / denom : 0;
-    twr = (1 + twr) * (1 + ret) - 1;
-    cum += pnl;
+    // 績效起算日之前：照常追蹤持股，但不累計損益與報酬
+    const tracking = !S.trackFrom || d >= S.trackFrom;
+    if (tracking) { twr = (1 + twr) * (1 + ret) - 1; cum += pnl; }
     realizedAll += realizedToday;
     const ix = D.index[d] || {}, pix = D.index[dates[i - 1]] || {};
     rows.push({
-      d, mv, eq, loan, accr, maint: loan > 0 ? mMV / loan : null, pnl, ret, cum, twr, flow, notes,
+      d, mv, eq, loan, accr, maint: loan > 0 ? mMV / loan : null, flow, notes,
+      pnl: tracking ? pnl : null, ret: tracking ? ret : null, cum: tracking ? cum : null, twr: tracking ? twr : null,
       taiex: ix.taiex, otc: ix.otc,
       taiexChg: ix.taiex && pix.taiex ? ix.taiex / pix.taiex - 1 : null,
       otcChg: ix.otc && pix.otc ? ix.otc / pix.otc - 1 : null,
@@ -448,7 +452,7 @@ function renderKPIs() {
   const k = [];
   if (trades.length) {
     k.push(`<div class="kpi"><div class="l">今日損益</div><div class="v num ${cls(today && today.pnl)}">${today ? sgn(today.pnl) : "—"}</div><div class="d num ${cls(today && today.ret)}">${today ? pct(today.ret) : "&nbsp;"}</div></div>`);
-    k.push(`<div class="kpi"><div class="l">累積損益</div><div class="v num ${cls(last && last.cum)}">${last ? sgn(last.cum) : "—"}</div><div class="d">報酬率 <span class="num ${cls(last && last.twr)}">${last ? pct(last.twr) : "—"}</span></div></div>`);
+    k.push(`<div class="kpi"><div class="l">累積損益${S.trackFrom ? `（${S.trackFrom.slice(5).replace("-", "/")} 起）` : ""}</div><div class="v num ${cls(last && last.cum)}">${last ? sgn(last.cum) : "—"}</div><div class="d">報酬率 <span class="num ${cls(last && last.twr)}">${last ? pct(last.twr) : "—"}</span></div></div>`);
     if (R.usesMargin && last) {
       k.push(`<div class="kpi"><div class="l">淨值（扣融資）</div><div class="v num">${fmt(last.eq)}</div><div class="d num">市值 ${fmt(R.totalMV)}</div><div class="d">${R.holdings.length} 檔持股</div></div>`);
     } else {
@@ -525,6 +529,7 @@ function renderCharts() {
     `<span class="${hiddenS.has("t") ? "off" : ""}">加權 ${sp(lastOf(rb.t))}</span><span class="${hiddenS.has("o") ? "off" : ""}">櫃買 ${sp(lastOf(rb.o))}</span>` : "";
   const hasP = trades.length > 0;
   $("#cumLegend").firstElementChild.style.display = hasP ? "" : "none";
+  $("#legendP").textContent = `我的持股（時間加權，${S.trackFrom ? S.trackFrom.replace(/-/g, "/") + " 起算" : "從第一筆交易起算"}）`;
   const ds = [];
   if (hasP) ds.push({ key: "p", hidden: hiddenS.has("p"), label: "我的持股", data: rb.p, borderColor: css("--s1"), backgroundColor: css("--s1"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.15 });
   ds.push({ key: "t", hidden: hiddenS.has("t"), label: "加權指數", data: rb.t, borderColor: css("--s2"), backgroundColor: css("--s2"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.15, spanGaps: true });
@@ -672,7 +677,7 @@ $("#tradeTable").addEventListener("click", e => {
 // ============================================================ 設定 / 匯入匯出
 const SF = $("#setForm");
 Object.keys(DEFAULT_SET).forEach(k => SF[k].value = S[k]);
-SF.addEventListener("submit", e => { e.preventDefault(); Object.keys(DEFAULT_SET).forEach(k => S[k] = +SF[k].value); store.set(LS_SET, S); renderAll(); alert("已儲存"); });
+SF.addEventListener("submit", e => { e.preventDefault(); Object.keys(DEFAULT_SET).forEach(k => S[k] = typeof DEFAULT_SET[k] === "string" ? SF[k].value : +SF[k].value); store.set(LS_SET, S); renderAll(); alert("已儲存"); });
 
 function download(name, text, type) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
 $("#exportBtn").onclick = () => download(`持股交易備份_${new Date().toLocaleDateString("sv-SE")}.json`, JSON.stringify({ version: 1, settings: S, trades }, null, 1), "application/json");
@@ -766,8 +771,8 @@ $("#reloadBtn").onclick = () => { D.stocks = {}; refresh(); };
 
 resetForm();
 refresh();
-// 開著的分頁在收盤資料更新後（台灣時間 15:30、19:00 左右）自動重抓
-setInterval(() => { const h = +new Date().toLocaleString("en-US", { timeZone: "Asia/Taipei", hour: "numeric", hour12: false }); if (h >= 15 && h <= 20 && !document.hidden) { D.stocks = {}; refresh(); } }, 30 * 60 * 1000);
+// 開著的分頁在收盤資料更新後（台灣時間 14:00–20:00）每 30 分鐘自動重抓
+setInterval(() => { const h = +new Date().toLocaleString("en-US", { timeZone: "Asia/Taipei", hour: "numeric", hour12: false }); if (h >= 14 && h <= 20 && !document.hidden) { D.stocks = {}; refresh(); } }, 30 * 60 * 1000);
 </script>
 </body>
 </html>

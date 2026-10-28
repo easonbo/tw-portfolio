@@ -65,16 +65,31 @@ def num(s):
         return None
 
 
-def get_json(url, params=None, tries=3):
+# 斷路器：某個端點從沒成功過、又連續失敗 3 次，就不再浪費時間打它
+_fail = {}
+_ok = set()
+DEAD_AFTER = 3
+
+
+def get_json(url, params=None, tries=2):
+    if url not in _ok and _fail.get(url, 0) >= DEAD_AFTER:
+        return None
+    short = url.split("//", 1)[-1][:70]
     for i in range(tries):
         try:
-            r = session.get(url, params=params, timeout=30)
+            r = session.get(url, params=params, timeout=15)
             if r.status_code == 200 and r.text.strip():
-                return r.json()
-            log(f"    HTTP {r.status_code} {url}")
+                js = r.json()
+                _ok.add(url)
+                _fail[url] = 0
+                return js
+            log(f"    HTTP {r.status_code} {short}")
         except Exception as e:  # noqa: BLE001
-            log(f"    error {type(e).__name__}: {e}")
+            log(f"    {type(e).__name__} {short}: {str(e)[:120]}")
         time.sleep(SLEEP * (i + 1))
+    _fail[url] = _fail.get(url, 0) + 1
+    if url not in _ok and _fail[url] == DEAD_AFTER:
+        log(f"    ⚠ {short} 連續失敗 {DEAD_AFTER} 次，本次執行不再使用")
     return None
 
 
@@ -289,6 +304,7 @@ class Store:
         self.meta = load_json(DATA / "meta.json", {})
         self.stocks = {}  # code -> dict（懶載入）
         self.dirty = set()
+        self.written = 0
         self.names = load_json(DATA / "names.json", {})
 
     def stock(self, code):
@@ -312,10 +328,12 @@ class Store:
     def save(self):
         for code in self.dirty:
             dump_json(STOCKS / f"{code}.json", self.stocks[code])
+        self.written += len(self.dirty)
         dump_json(DATA / "index.json", self.index)
         dump_json(DATA / "names.json", self.names)
         dump_json(DATA / "meta.json", self.meta)
-        log(f"已寫入 {len(self.dirty)} 檔股票資料")
+        log(f"  💾 已存檔（{len(self.dirty)} 檔有更新，資料到 {self.meta.get('last_date')}）")
+        self.dirty = set()
 
 
 # ---------------------------------------------------------------- main
@@ -323,7 +341,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--start")
     ap.add_argument("--end")
+    ap.add_argument("--max-minutes", type=float, default=float(os.environ.get("MAX_MINUTES", 100)),
+                    help="超過這個時間就先存檔結束，下次從斷點繼續")
     a = ap.parse_args()
+    t0 = time.time()
 
     store = Store()
     today = dt.datetime.now(TW).date()
@@ -339,12 +360,22 @@ def main():
     log(f"更新區間 {start} ~ {end}")
     sources = store.meta.get("sources", {})
     failures = []
+    days_done = 0
+    stopped_early = False
     d = start
     while d <= end:
         if d.weekday() >= 5:
             d += dt.timedelta(days=1)
             continue
-        log(f"[{d}]")
+        elapsed = (time.time() - t0) / 60
+        if elapsed > a.max_minutes:
+            log(f"⏱ 已執行 {elapsed:.0f} 分鐘，先存檔結束。下次 Run workflow 時 start 留空，會從 {store.meta.get('last_date')} 接著抓。")
+            stopped_early = True
+            break
+        if days_done and days_done % 15 == 0:
+            store.save()
+        days_done += 1
+        log(f"[{d}]  （已執行 {elapsed:.1f} 分）")
         tw_stocks, taiex = fetch_twse(d)
         if tw_stocks is None:
             failures.append(f"{d} 上市")
@@ -392,8 +423,12 @@ def main():
     store.save()
     if failures:
         log("以下日期抓取失敗：", ", ".join(failures))
-    # 全部失敗才讓 workflow 標紅
-    if failures and not store.dirty:
+    dead = [u for u, n in _fail.items() if n >= DEAD_AFTER and u not in _ok]
+    if dead:
+        log("本次停用的端點：", ", ".join(dead))
+    log(f"完成，共 {(time.time() - t0) / 60:.1f} 分鐘" + ("（未抓完，請再執行一次）" if stopped_early else ""))
+    # 一筆都沒寫入才讓 workflow 標紅
+    if failures and not store.written:
         sys.exit(1)
 
 

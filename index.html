@@ -46,7 +46,7 @@ h1{font-size:22px;margin:0;font-weight:700;letter-spacing:.02em}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.danger{color:var(--up)}
 .btn.sm{padding:2px 8px;font-size:12px}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:10px;margin-bottom:16px}
 .kpi{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
 .kpi .l{color:var(--text-2);font-size:12px}
 .kpi .v{font-size:22px;font-weight:500;margin-top:2px}
@@ -79,6 +79,10 @@ textarea{font-family:"JetBrains Mono",monospace;font-size:12px}
 .tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:4px;background:var(--surface-2);color:var(--text-2);margin-left:4px}
 .hidden{display:none}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+label.chk>span:first-child{display:flex;align-items:center;gap:6px;color:var(--text);font-size:14px;height:34px}
+label.chk input{width:auto;margin:0}
+.warn{color:#c98500}
+.tag.m{background:color-mix(in srgb,var(--s1) 18%,transparent);color:var(--text)}
 @media (max-width:600px){.kpi .v{font-size:19px}.chartbox{height:240px}}
 </style>
 </head>
@@ -158,6 +162,9 @@ textarea{font-family:"JetBrains Mono",monospace;font-size:12px}
         <label data-f="amount" class="hidden">股利金額（元，實收）<input name="amount" type="number" min="0" step="1"></label>
         <label data-f="fee">手續費（空白=自動）<input name="fee" type="number" min="0" step="1"></label>
         <label data-f="tax">證交稅（空白=自動）<input name="tax" type="number" min="0" step="1"></label>
+        <label data-f="margin" class="chk"><span><input name="margin" type="checkbox"> <span id="marginLbl">融資買進</span></span><span class="hint" id="marginHint">&nbsp;</span></label>
+        <label data-f="loan" class="hidden">融資金額（空白=自動）<input name="loan" type="number" min="0" step="1000"></label>
+        <label data-f="interest" class="hidden">融資利息（空白=估算）<input name="interest" type="number" min="0" step="1"></label>
         <div class="row">
           <button class="btn primary" type="submit" id="submitBtn">新增</button>
           <button class="btn hidden" type="button" id="cancelEdit">取消</button>
@@ -182,9 +189,13 @@ textarea{font-family:"JetBrains Mono",monospace;font-size:12px}
         <label>股票證交稅<input name="stockTax" type="number" step="0.0001"></label>
         <label>ETF 證交稅<input name="etfTax" type="number" step="0.0001"></label>
         <label>債券 ETF 證交稅<input name="bondEtfTax" type="number" step="0.0001"></label>
+        <label>融資年利率（0.065 = 6.5%）<input name="marginRate" type="number" step="0.0001" min="0"></label>
+        <label>融資成數・上市<input name="ratioTWSE" type="number" step="0.1" min="0" max="1"></label>
+        <label>融資成數・上櫃<input name="ratioTPEx" type="number" step="0.1" min="0" max="1"></label>
         <div><button class="btn primary" type="submit">儲存</button></div>
       </form>
       <p class="hint">手續費 = 成交金額 × 0.1425% × 折數（無條件捨去，不足最低收最低）；證交稅只在賣出收取。代號 00 開頭視為 ETF，00 開頭且 B 結尾視為債券 ETF。個別交易填了手續費/稅就以你填的為準。</p>
+      <p class="hint">融資：融資金額 = 成交金額 × 成數，千元以下捨去；利息 = 融資金額 × 年利率 × 日曆天數 ÷ 365，每天估算計入損益，償還當天以實際利息校正（融資賣出時可填對帳單上的利息）。擔保維持率 = 融資股票市值 ÷ 融資餘額。</p>
     </div>
     <div class="card">
       <h2>備份與搬移</h2>
@@ -197,8 +208,8 @@ textarea{font-family:"JetBrains Mono",monospace;font-size:12px}
     </div>
     <div class="card">
       <h2>從 CSV 批次匯入</h2>
-      <p class="hint" style="margin-top:0">每行一筆：<span class="mono">日期,代號,類別,股數,價格[,手續費,稅]</span>。類別可寫 買/賣/息/配。股利：<span class="mono">2026-07-15,2330,息,,,4500</span> 的第 6 欄寫金額；配股第 4 欄寫股數。</p>
-      <textarea id="csvIn" rows="6" placeholder="2026-03-02,2330,買,1000,980&#10;2026-05-10,0050,買,2000,185.5&#10;2026-07-15,2330,息,,,4500"></textarea>
+      <p class="hint" style="margin-top:0">每行一筆：<span class="mono">日期,代號,類別,股數,價格[,手續費,稅]</span>。類別可寫 買/賣/息/配，融資寫 資買/資賣（資賣可在第 8 欄填實際利息）。股利：<span class="mono">2026-07-15,2330,息,,,4500</span> 的第 6 欄寫金額；配股第 4 欄寫股數。</p>
+      <textarea id="csvIn" rows="6" placeholder="2026-03-02,2330,買,1000,980&#10;2026-04-01,2317,資買,2000,180&#10;2026-05-10,0050,買,2000,185.5&#10;2026-06-15,2317,資賣,2000,200,,,1450&#10;2026-07-15,2330,息,,,4500"></textarea>
       <div class="row" style="margin-top:8px"><button class="btn primary" id="csvBtn">匯入</button><span class="hint" id="csvMsg"></span></div>
     </div>
   </section>
@@ -208,7 +219,7 @@ textarea{font-family:"JetBrains Mono",monospace;font-size:12px}
 "use strict";
 // ============================================================ 狀態
 const LS_TRADES = "twp_trades_v1", LS_SET = "twp_settings_v1", LS_THEME = "twp_theme";
-const DEFAULT_SET = { discount: 1, minFee: 20, stockTax: 0.003, etfTax: 0.001, bondEtfTax: 0 };
+const DEFAULT_SET = { discount: 1, minFee: 20, stockTax: 0.003, etfTax: 0.001, bondEtfTax: 0, marginRate: 0.065, ratioTWSE: 0.6, ratioTPEx: 0.5 };
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { alert("無法寫入瀏覽器儲存空間：" + e.message); } }
@@ -239,6 +250,16 @@ function costs(t) {
   const tax = t.tax != null && t.tax !== "" ? +t.tax : (t.type === "sell" ? Math.floor(gross * taxRate(t.code)) : 0);
   return { gross, fee, tax };
 }
+const has = v => v != null && v !== "";
+function marketOf(code) { return (D.names[code] && D.names[code][1]) || (D.stocks[code] && D.stocks[code].m) || "TWSE"; }
+function loanOf(t) {   // 融資買進的借款金額
+  if (!t.margin || t.type !== "buy") return 0;
+  if (has(t.loan)) return +t.loan;
+  const ratio = marketOf(t.code) === "TPEx" ? S.ratioTPEx : S.ratioTWSE;
+  return Math.floor((t.shares || 0) * (t.price || 0) * ratio / 1000) * 1000;
+}
+const dayDiff = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+function accrued(lots, d) { return lots.reduce((s, l) => s + l.loan * S.marginRate * Math.max(0, dayDiff(l.date, d)) / 365, 0); }
 
 // ============================================================ 載入資料
 async function getJSON(p) {
@@ -277,36 +298,55 @@ function compute() {
   const first = active.length ? dates.find(d => d >= active[0].date) : null;
   const firstIdx = first ? dates.indexOf(first) : dates.length;
 
-  const pos = {};      // code -> {shares, cost, realized, last, prev, tradedPx}
+  // pos: code -> { shares（合計）, mShares（融資股數）, cost（含費用總成本）, lots[{date,loan,shares}], realized, last, prev }
+  const pos = {};
   const rows = [];
-  let prevMV = 0, cum = 0, twr = 0, realizedAll = 0, divAll = 0, feesAll = 0;
+  let prevEq = 0, cum = 0, twr = 0, realizedAll = 0, divAll = 0, feesAll = 0, interestPaidAll = 0;
   const baseD = dates[Math.max(0, firstIdx - 1)];
   const base = { taiex: (D.index[baseD] || {}).taiex, otc: (D.index[baseD] || {}).otc };
+  const tradeInfo = {};   // id -> { cash: 實際進出你帳戶的金額, repaid, interest, loan }
+  const allLots = () => Object.values(pos).flatMap(p => p.lots);
 
   for (let i = firstIdx; i < dates.length; i++) {
     const d = dates[i];
-    let flow = 0, buyCost = 0, realizedToday = 0;
+    let flow = 0, buyOwn = 0, realizedToday = 0;
     const notes = [];
     for (const p of Object.values(pos)) p.prev = p.last;
     for (const t of byDay[d] || []) {
-      const p = pos[t.code] = pos[t.code] || { shares: 0, cost: 0, realized: 0, last: null, prev: null, dayFlow: 0 };
+      const p = pos[t.code] = pos[t.code] || { shares: 0, mShares: 0, cost: 0, lots: [], realized: 0, last: null, prev: null };
       const { gross, fee, tax } = costs(t);
       feesAll += fee + tax;
       if (t.type === "buy") {
-        const tot = gross + fee;
-        p.shares += +t.shares; p.cost += tot; flow += tot; buyCost += tot;
+        const tot = gross + fee, loan = loanOf(t);
+        p.shares += +t.shares; p.cost += tot;
+        if (t.margin) { p.mShares += +t.shares; p.lots.push({ date: t.date, loan, shares: +t.shares }); }
+        flow += tot - loan; buyOwn += tot - loan;
+        tradeInfo[t.id] = { cash: -(tot - loan), loan };
         if (p.last == null) p.last = +t.price;
-        notes.push(`買 ${t.code} ${fmt(+t.shares)}`);
+        notes.push(`${t.margin ? "資買" : "買"} ${t.code} ${fmt(+t.shares)}`);
       } else if (t.type === "sell") {
         const sh = Math.min(+t.shares, p.shares);
         const net = gross - fee - tax;
         const avg = p.shares ? p.cost / p.shares : 0;
-        const r = net - avg * sh;
+        // 融資賣出先還融資部位，現股賣出先賣現股；不夠時再動用另一邊
+        const cashSh = p.shares - p.mShares;
+        let fromM = t.margin ? Math.min(sh, p.mShares) : Math.max(0, sh - cashSh);
+        let repaid = 0, estInt = 0, left = fromM;
+        while (left > 0 && p.lots.length) {
+          const l = p.lots[0], take = Math.min(left, l.shares), part = l.loan * take / l.shares;
+          repaid += part; estInt += part * S.marginRate * Math.max(0, dayDiff(l.date, t.date)) / 365;
+          l.loan -= part; l.shares -= take; left -= take;
+          if (l.shares <= 0) p.lots.shift();
+        }
+        const interest = fromM > 0 ? (has(t.interest) ? +t.interest : Math.round(estInt)) : 0;
+        interestPaidAll += interest;
+        const r = net - avg * sh - interest;
         p.realized += r; realizedToday += r;
-        p.shares -= sh; p.cost -= avg * sh;
-        if (p.shares <= 0) { p.shares = 0; p.cost = 0; }
-        flow -= net;
-        notes.push(`賣 ${t.code} ${fmt(+t.shares)}`);
+        p.shares -= sh; p.mShares -= fromM; p.cost -= avg * sh;
+        if (p.shares <= 0) { p.shares = 0; p.mShares = 0; p.cost = 0; p.lots = []; }
+        flow -= net - repaid - interest;
+        tradeInfo[t.id] = { cash: net - repaid - interest, repaid: Math.round(repaid), interest, estimated: fromM > 0 && !has(t.interest) };
+        notes.push(`${fromM > 0 ? "資賣" : "賣"} ${t.code} ${fmt(+t.shares)}`);
       } else if (t.type === "cash") {
         const a = +t.amount || 0;
         p.realized += a; realizedToday += a; divAll += a; flow -= a;
@@ -316,43 +356,48 @@ function compute() {
         notes.push(`配 ${t.code} ${fmt(+t.shares)}`);
       }
     }
-    let mv = 0;
+    let mv = 0, mMV = 0;
     for (const [c, p] of Object.entries(pos)) {
       const px = D.stocks[c] && D.stocks[c].d[d];
       if (px) p.last = px;
-      if (p.shares > 0 && p.last != null) mv += p.shares * p.last;
+      if (p.shares > 0 && p.last != null) { mv += p.shares * p.last; mMV += p.mShares * p.last; }
     }
-    const pnl = mv - prevMV - flow;
-    const denom = prevMV + buyCost;
+    const lots = allLots();
+    const loan = lots.reduce((s, l) => s + l.loan, 0);
+    const accr = accrued(lots, d);
+    const eq = mv - loan - accr;
+    const pnl = eq - prevEq - flow;
+    const denom = prevEq + buyOwn;
     const ret = denom > 0 ? pnl / denom : 0;
     twr = (1 + twr) * (1 + ret) - 1;
     cum += pnl;
     realizedAll += realizedToday;
     const ix = D.index[d] || {}, pix = D.index[dates[i - 1]] || {};
     rows.push({
-      d, mv, pnl, ret, cum, twr, flow, notes,
+      d, mv, eq, loan, accr, maint: loan > 0 ? mMV / loan : null, pnl, ret, cum, twr, flow, notes,
       taiex: ix.taiex, otc: ix.otc,
       taiexChg: ix.taiex && pix.taiex ? ix.taiex / pix.taiex - 1 : null,
       otcChg: ix.otc && pix.otc ? ix.otc / pix.otc - 1 : null,
       taiexCum: ix.taiex && base.taiex ? ix.taiex / base.taiex - 1 : null,
       otcCum: ix.otc && base.otc ? ix.otc / base.otc - 1 : null,
     });
-    prevMV = mv;
+    prevEq = eq;
   }
 
   // 目前持股
   const holdings = Object.entries(pos).filter(([, p]) => p.shares > 0).map(([c, p]) => {
     const mv = p.shares * p.last;
+    const loan = p.lots.reduce((s, l) => s + l.loan, 0);
     const dayChg = p.prev != null && p.last != null ? p.last - p.prev : null;
-    return { code: c, name: nameOf(c), shares: p.shares, avg: p.cost / p.shares, cost: p.cost, last: p.last, prev: p.prev,
+    return { code: c, name: nameOf(c), shares: p.shares, mShares: p.mShares, loan, avg: p.cost / p.shares, cost: p.cost, last: p.last, prev: p.prev,
       dayChg, dayPct: dayChg != null && p.prev ? dayChg / p.prev : null, mv, unreal: mv - p.cost, unrealPct: p.cost ? (mv - p.cost) / p.cost : null,
+      own: p.cost - loan, ownPct: p.cost - loan ? (mv - p.cost) / (p.cost - loan) : null,
       stale: !(D.stocks[c] && D.stocks[c].d[lastDate]), missing: D.stocks[c] && D.stocks[c].missing };
   }).sort((a, b) => b.mv - a.mv);
   const totalMV = holdings.reduce((s, h) => s + h.mv, 0);
   holdings.forEach(h => h.w = totalMV ? h.mv / totalMV : 0);
   const unrealAll = holdings.reduce((s, h) => s + h.unreal, 0);
 
-  // 每日當天各股損益（用於持股表「今日損益」）
   const lastRow = rows[rows.length - 1];
   const todayTrades = lastRow ? (byDay[lastRow.d] || []) : [];
   holdings.forEach(h => {
@@ -360,7 +405,9 @@ function compute() {
     h.dayPnl = h.dayChg != null && !tradedToday ? h.dayChg * h.shares : null;
   });
 
-  return { dates, rows, holdings, totalMV, unrealAll, realizedAll, divAll, feesAll, pending, lastDate, closedPos: Object.entries(pos).filter(([, p]) => p.shares === 0) };
+  const loanAll = lastRow ? lastRow.loan : 0, accrAll = lastRow ? lastRow.accr : 0;
+  const usesMargin = trades.some(t => t.margin);
+  return { dates, rows, holdings, totalMV, unrealAll, realizedAll, divAll, feesAll, interestPaidAll, loanAll, accrAll, usesMargin, pending, lastDate, tradeInfo };
 }
 
 // ============================================================ 畫面
@@ -376,8 +423,23 @@ function renderKPIs() {
   if (trades.length) {
     k.push(`<div class="kpi"><div class="l">今日損益</div><div class="v num ${cls(today && today.pnl)}">${today ? sgn(today.pnl) : "—"}</div><div class="d num ${cls(today && today.ret)}">${today ? pct(today.ret) : "&nbsp;"}</div></div>`);
     k.push(`<div class="kpi"><div class="l">累積損益</div><div class="v num ${cls(last && last.cum)}">${last ? sgn(last.cum) : "—"}</div><div class="d">報酬率 <span class="num ${cls(last && last.twr)}">${last ? pct(last.twr) : "—"}</span></div></div>`);
-    k.push(`<div class="kpi"><div class="l">總市值</div><div class="v num">${fmt(R.totalMV)}</div><div class="d">${R.holdings.length} 檔持股</div></div>`);
+    if (R.usesMargin && last) {
+      k.push(`<div class="kpi"><div class="l">淨值（扣融資）</div><div class="v num">${fmt(last.eq)}</div><div class="d num">市值 ${fmt(R.totalMV)}</div><div class="d">${R.holdings.length} 檔持股</div></div>`);
+    } else {
+      k.push(`<div class="kpi"><div class="l">總市值</div><div class="v num">${fmt(R.totalMV)}</div><div class="d">${R.holdings.length} 檔持股</div></div>`);
+    }
     k.push(`<div class="kpi"><div class="l">未實現 / 已實現</div><div class="v num ${cls(R.unrealAll)}" style="font-size:18px">${sgn(R.unrealAll)}</div><div class="d num ${cls(R.realizedAll)}">已實現 ${sgn(R.realizedAll)}</div></div>`);
+    if (R.usesMargin && last) {
+      const m = last.maint, mc = m == null ? "" : m < 1.3 ? "up" : m < 1.5 ? "warn" : "";
+      const nM = R.holdings.filter(h => h.loan > 0).length;
+      const mMV = m != null ? m * R.loanAll : 0;
+      k.push(`<div class="kpi" style="border-color:${mc === "up" ? "var(--up)" : mc === "warn" ? "#c98500" : "var(--border)"}"><div class="l">融資餘額</div><div class="v num">${fmt(R.loanAll)}</div>` +
+        (m != null
+          ? `<div class="d ${mc}" title="追繳線 130%">維持率 <b class="num">${(m * 100).toFixed(1)}%</b>${m < 1.3 ? " ⚠ 低於追繳線" : m < 1.5 ? " ⚠ 接近追繳線" : ""}</div>
+             <div class="d num" title="${nM} 檔融資股">融資股 ${fmt(mMV)}</div>
+             <div class="d num" title="${R.interestPaidAll ? "已付利息 " + fmt(R.interestPaidAll) : ""}">應計利息 −${fmt(R.accrAll)}</div>`
+          : `<div class="d">目前無融資部位${R.interestPaidAll ? `・已付利息 ${fmt(R.interestPaidAll)}` : ""}</div>`) + `</div>`);
+    }
   }
   k.push(`<div class="kpi"><div class="l">加權指數</div><div class="v num">${fmt(ix.taiex, 2)}</div><div class="d num ${cls(tChg)}">${sgn(tChg, 2)}　${pct(tChg != null ? tChg / pix.taiex : null)}</div></div>`);
   k.push(`<div class="kpi"><div class="l">櫃買指數</div><div class="v num">${fmt(ix.otc, 2)}</div><div class="d num ${cls(oChg)}">${sgn(oChg, 2)}　${pct(oChg != null ? oChg / pix.otc : null)}</div></div>`);
@@ -445,24 +507,26 @@ function renderCharts() {
 function renderHoldings() {
   const h = R.holdings;
   if (!trades.length) { $("#holdTable").innerHTML = `<tr><td class="l" style="color:var(--text-2);white-space:normal">還沒有交易紀錄。到「交易紀錄」分頁新增買進，或在「設定與備份」用 CSV 一次匯入。</td></tr>`; $("#holdHint").textContent = ""; return; }
-  let html = `<thead><tr><th class="l">代號</th><th class="l">名稱</th><th>股數</th><th>均價</th><th>收盤</th><th>漲跌</th><th>今日損益</th><th>市值</th><th>未實現損益</th><th>報酬率</th><th>權重</th></tr></thead><tbody>`;
+  const M = R.usesMargin;
+  let html = `<thead><tr><th class="l">代號</th><th class="l">名稱</th><th>股數</th><th>均價</th><th>收盤</th><th>漲跌</th><th>今日損益</th><th>市值</th>${M ? "<th>融資餘額</th>" : ""}<th>未實現損益</th><th>報酬率</th>${M ? "<th>自備報酬</th>" : ""}<th>權重</th></tr></thead><tbody>`;
   for (const x of h) {
     html += `<tr><td class="l mono">${x.code}</td><td class="l">${x.name || ""}${x.missing ? '<span class="tag">無資料</span>' : x.stale ? '<span class="tag">今日無成交</span>' : ""}</td>
-      <td class="num">${fmt(x.shares)}</td><td class="num">${fmt(x.avg, 2)}</td><td class="num">${fmt(x.last, 2)}</td>
+      <td class="num">${fmt(x.shares)}${x.mShares ? `<span class="tag m">資 ${fmt(x.mShares)}</span>` : ""}</td><td class="num">${fmt(x.avg, 2)}</td><td class="num">${fmt(x.last, 2)}</td>
       <td class="num ${cls(x.dayChg)}">${x.dayChg == null ? "—" : sgn(x.dayChg, 2) + " " + pct(x.dayPct)}</td>
       <td class="num ${cls(x.dayPnl)}">${x.dayPnl == null ? "—" : sgn(x.dayPnl)}</td>
-      <td class="num">${fmt(x.mv)}</td><td class="num ${cls(x.unreal)}">${sgn(x.unreal)}</td><td class="num ${cls(x.unrealPct)}">${pct(x.unrealPct)}</td><td class="num">${(x.w * 100).toFixed(1)}%</td></tr>`;
+      <td class="num">${fmt(x.mv)}</td>${M ? `<td class="num">${x.loan ? fmt(x.loan) : "—"}</td>` : ""}<td class="num ${cls(x.unreal)}">${sgn(x.unreal)}</td><td class="num ${cls(x.unrealPct)}">${pct(x.unrealPct)}</td>${M ? `<td class="num ${cls(x.ownPct)}">${x.loan ? pct(x.ownPct) : "—"}</td>` : ""}<td class="num">${(x.w * 100).toFixed(1)}%</td></tr>`;
   }
   const cost = h.reduce((s, x) => s + x.cost, 0);
-  html += `</tbody><tfoot><tr><th class="l" colspan="7">合計</th><th class="num">${fmt(R.totalMV)}</th><th class="num ${cls(R.unrealAll)}">${sgn(R.unrealAll)}</th><th class="num ${cls(R.unrealAll)}">${pct(cost ? R.unrealAll / cost : null)}</th><th>100%</th></tr></tfoot>`;
+  html += `</tbody><tfoot><tr><th class="l" colspan="7">合計</th><th class="num">${fmt(R.totalMV)}</th>${M ? `<th class="num">${fmt(R.loanAll)}</th>` : ""}<th class="num ${cls(R.unrealAll)}">${sgn(R.unrealAll)}</th><th class="num ${cls(R.unrealAll)}">${pct(cost ? R.unrealAll / cost : null)}</th>${M ? "<th></th>" : ""}<th>100%</th></tr></tfoot>`;
   $("#holdTable").innerHTML = html;
-  $("#holdHint").textContent = `均價含買進手續費・已實現（含股利）${sgn(R.realizedAll)}・累計費稅 ${fmt(R.feesAll)}` + (R.pending.length ? `・${R.pending.length} 筆交易待收盤資料` : "");
+  $("#holdHint").textContent = `均價含買進手續費・已實現（含股利）${sgn(R.realizedAll)}・累計費稅 ${fmt(R.feesAll)}` + (R.interestPaidAll ? `・已付融資利息 ${fmt(R.interestPaidAll)}` : "") + (M ? "・自備報酬 = 未實現 ÷（成本 − 融資）" : "") + (R.pending.length ? `・${R.pending.length} 筆交易待收盤資料` : "");
 }
 
 function renderDaily() {
-  let html = `<thead><tr><th class="l">日期</th><th>市值</th><th>當日損益</th><th>當日報酬</th><th>累積損益</th><th>累積報酬</th><th>加權</th><th>櫃買</th><th class="l">交易</th></tr></thead><tbody>`;
+  const M = R.usesMargin;
+  let html = `<thead><tr><th class="l">日期</th><th>市值</th>${M ? "<th>融資餘額</th><th>淨值</th><th>維持率</th>" : ""}<th>當日損益</th><th>當日報酬</th><th>累積損益</th><th>累積報酬</th><th>加權</th><th>櫃買</th><th class="l">交易</th></tr></thead><tbody>`;
   for (const r of R.rows.slice().reverse()) {
-    html += `<tr><td class="l mono">${r.d}</td><td class="num">${fmt(r.mv)}</td><td class="num ${cls(r.pnl)}">${sgn(r.pnl)}</td><td class="num ${cls(r.ret)}">${pct(r.ret)}</td>
+    html += `<tr><td class="l mono">${r.d}</td><td class="num">${fmt(r.mv)}</td>${M ? `<td class="num">${r.loan ? fmt(r.loan) : "—"}</td><td class="num">${fmt(r.eq)}</td><td class="num ${r.maint != null && r.maint < 1.3 ? "up" : r.maint != null && r.maint < 1.5 ? "warn" : ""}">${r.maint != null ? (r.maint * 100).toFixed(1) + "%" : "—"}</td>` : ""}<td class="num ${cls(r.pnl)}">${sgn(r.pnl)}</td><td class="num ${cls(r.ret)}">${pct(r.ret)}</td>
       <td class="num ${cls(r.cum)}">${sgn(r.cum)}</td><td class="num ${cls(r.twr)}">${pct(r.twr)}</td>
       <td class="num ${cls(r.taiexChg)}">${fmt(r.taiex, 2)} <small>${pct(r.taiexChg)}</small></td><td class="num ${cls(r.otcChg)}">${fmt(r.otc, 2)} <small>${pct(r.otcChg)}</small></td>
       <td class="l" style="color:var(--text-2)">${r.notes.join("、")}</td></tr>`;
@@ -474,11 +538,15 @@ const TYPE_ZH = { buy: "買進", sell: "賣出", cash: "現金股利", sdiv: "�
 function renderTrades() {
   const list = trades.slice().sort((a, b) => a.date < b.date ? 1 : -1);
   $("#tradeCount").textContent = list.length ? `${list.length} 筆` : "";
-  let html = `<thead><tr><th class="l">日期</th><th class="l">類別</th><th class="l">代號</th><th class="l">名稱</th><th>股數</th><th>價格/金額</th><th>手續費</th><th>稅</th><th>收付金額</th><th></th></tr></thead><tbody>`;
+  let html = `<thead><tr><th class="l">日期</th><th class="l">類別</th><th class="l">代號</th><th class="l">名稱</th><th>股數</th><th>價格/金額</th><th>手續費</th><th>稅</th><th title="實際進出帳戶的金額：融資買進為自備款，融資賣出已扣償還本金與利息">收付金額</th><th></th></tr></thead><tbody>`;
   for (const t of list) {
     const { gross, fee, tax } = costs(t);
-    const cash = t.type === "buy" ? -(gross + fee) : t.type === "sell" ? gross - fee - tax : t.type === "cash" ? +t.amount : 0;
-    html += `<tr><td class="l mono">${t.date}</td><td class="l ${t.type === "buy" ? "up" : t.type === "sell" ? "down" : ""}">${TYPE_ZH[t.type]}</td><td class="l mono">${t.code}</td><td class="l">${nameOf(t.code)}</td>
+    const loan = loanOf(t);
+    const info = R.tradeInfo[t.id];
+    const cash = info ? info.cash : t.type === "buy" ? -(gross + fee - loan) : t.type === "sell" ? gross - fee - tax : t.type === "cash" ? +t.amount : 0;
+    const mtag = t.margin ? (t.type === "buy" ? `<span class="tag m">融資 ${fmt(loan)}</span>`
+      : `<span class="tag m">還本 ${info ? fmt(info.repaid) : "—"}・息 ${info ? fmt(info.interest) + (info.estimated ? "(估)" : "") : "—"}</span>`) : "";
+    html += `<tr><td class="l mono">${t.date}</td><td class="l ${t.type === "buy" ? "up" : t.type === "sell" ? "down" : ""}">${t.margin ? "融資" : ""}${TYPE_ZH[t.type]}${mtag}</td><td class="l mono">${t.code}</td><td class="l">${nameOf(t.code)}</td>
       <td class="num">${t.shares ? fmt(+t.shares) : "—"}</td><td class="num">${t.type === "cash" ? fmt(+t.amount) : t.price ? fmt(+t.price, 2) : "—"}</td>
       <td class="num">${fee ? fmt(fee) : "—"}${t.fee != null && t.fee !== "" ? "" : fee ? '<span class="tag">自動</span>' : ""}</td><td class="num">${tax ? fmt(tax) : "—"}</td>
       <td class="num">${cash ? sgn(cash) : "—"}</td>
@@ -511,12 +579,17 @@ function syncForm() {
   const show = (f, on) => F.querySelector(`[data-f="${f}"]`).classList.toggle("hidden", !on);
   show("shares", ty !== "cash"); show("price", ty === "buy" || ty === "sell");
   show("amount", ty === "cash"); show("fee", ty === "buy" || ty === "sell"); show("tax", ty === "sell");
+  const isM = (ty === "buy" || ty === "sell") && F.margin.checked;
+  show("margin", ty === "buy" || ty === "sell"); show("loan", ty === "buy" && isM); show("interest", ty === "sell" && isM);
+  $("#marginLbl").textContent = ty === "sell" ? "融資賣出（償還）" : "融資買進";
   const c = F.code.value.trim().toUpperCase();
   $("#codeName").textContent = nameOf(c) || " ";
   if ((ty === "buy" || ty === "sell") && +F.shares.value && +F.price.value) {
     const { gross, fee, tax } = costs({ type: ty, code: c, shares: +F.shares.value, price: +F.price.value, fee: F.fee.value, tax: F.tax.value });
     const net = ty === "buy" ? gross + fee : gross - fee - tax;
-    $("#feePreview").textContent = `成交金額 ${fmt(gross)}・手續費 ${fmt(fee)}${ty === "sell" ? "・證交稅 " + fmt(tax) : ""}・${ty === "buy" ? "應付" : "應收"} ${fmt(net)} 元`;
+    const loan = ty === "buy" && isM ? loanOf({ type: "buy", margin: true, code: c, shares: +F.shares.value, price: +F.price.value, loan: F.loan.value }) : 0;
+    $("#feePreview").textContent = `成交金額 ${fmt(gross)}・手續費 ${fmt(fee)}${ty === "sell" ? "・證交稅 " + fmt(tax) : ""}・${ty === "buy" ? "應付" : "應收"} ${fmt(net)} 元` +
+      (loan ? `・融資 ${fmt(loan)}・自備款 ${fmt(net - loan)} 元` : "") + (ty === "sell" && isM ? "（再扣償還本金與利息）" : "");
   } else $("#feePreview").textContent = "";
 }
 F.addEventListener("input", syncForm);
@@ -526,6 +599,11 @@ F.addEventListener("submit", async e => {
   if (t.type !== "cash") t.shares = +F.shares.value;
   if (t.type === "buy" || t.type === "sell") { t.price = +F.price.value; if (F.fee.value !== "") t.fee = +F.fee.value; }
   if (t.type === "sell" && F.tax.value !== "") t.tax = +F.tax.value;
+  if ((t.type === "buy" || t.type === "sell") && F.margin.checked) {
+    t.margin = true;
+    if (t.type === "buy" && F.loan.value !== "") t.loan = +F.loan.value;
+    if (t.type === "sell" && F.interest.value !== "") t.interest = +F.interest.value;
+  }
   if (t.type === "cash") t.amount = +F.amount.value;
   if (t.type !== "cash" && !(t.shares > 0)) return alert("請填股數");
   if ((t.type === "buy" || t.type === "sell") && !(t.price > 0)) return alert("請填成交價");
@@ -547,6 +625,7 @@ $("#tradeTable").addEventListener("click", e => {
     const t = trades.find(x => x.id === ed); editingId = ed;
     F.date.value = t.date; F.type.value = t.type; F.code.value = t.code; F.shares.value = t.shares ?? ""; F.price.value = t.price ?? "";
     F.amount.value = t.amount ?? ""; F.fee.value = t.fee ?? ""; F.tax.value = t.tax ?? "";
+    F.margin.checked = !!t.margin; F.loan.value = t.loan ?? ""; F.interest.value = t.interest ?? "";
     $("#formTitle").textContent = "編輯交易"; $("#submitBtn").textContent = "儲存修改"; $("#cancelEdit").classList.remove("hidden");
     syncForm(); F.scrollIntoView({ behavior: "smooth" });
   }
@@ -574,19 +653,21 @@ $("#importFile").onchange = async e => {
 };
 $("#clearBtn").onclick = () => { if (confirm("確定刪除全部交易？建議先匯出備份。")) { trades = []; store.set(LS_TRADES, trades); renderAll(); } };
 
-const TYPE_IN = { "買": "buy", "買進": "buy", buy: "buy", b: "buy", "賣": "sell", "賣出": "sell", sell: "sell", s: "sell", "息": "cash", "股息": "cash", "現金股利": "cash", cash: "cash", "配": "sdiv", "配股": "sdiv", "股票股利": "sdiv", sdiv: "sdiv" };
+const TYPE_IN = { "買": "buy", "買進": "buy", buy: "buy", b: "buy", "賣": "sell", "賣出": "sell", sell: "sell", s: "sell", "息": "cash", "股息": "cash", "現金股利": "cash", cash: "cash", "配": "sdiv", "配股": "sdiv", "股票股利": "sdiv", sdiv: "sdiv", "資買": "mbuy", "融資買": "mbuy", "融資買進": "mbuy", "資賣": "msell", "融資賣": "msell", "融資賣出": "msell" };
 $("#csvBtn").onclick = async () => {
   const lines = $("#csvIn").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   const add = [], bad = [];
   lines.forEach((ln, i) => {
     const c = ln.split(/[,\t]/).map(s => s.trim());
     const date = (c[0] || "").replace(/\//g, "-").replace(/^(\d{4})-(\d{1,2})-(\d{1,2})$/, (m, y, mo, d) => `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`);
-    const type = TYPE_IN[(c[2] || "").toLowerCase()] || TYPE_IN[c[2]];
+    let type = TYPE_IN[(c[2] || "").toLowerCase()] || TYPE_IN[c[2]];
+    const margin = type === "mbuy" || type === "msell";
+    if (margin) type = type === "mbuy" ? "buy" : "sell";
     const t = { id: uid(), date, code: (c[1] || "").toUpperCase(), type };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !t.code || !type) return bad.push(i + 1);
     if (type === "cash") { t.amount = +(c[5] || c[4] || c[3]); if (!(t.amount > 0)) return bad.push(i + 1); }
     else { t.shares = +c[3]; if (!(t.shares > 0)) return bad.push(i + 1); }
-    if (type === "buy" || type === "sell") { t.price = +c[4]; if (!(t.price > 0)) return bad.push(i + 1); if (c[5]) t.fee = +c[5]; if (c[6]) t.tax = +c[6]; }
+    if (type === "buy" || type === "sell") { t.price = +c[4]; if (!(t.price > 0)) return bad.push(i + 1); if (c[5]) t.fee = +c[5]; if (c[6]) t.tax = +c[6]; if (margin) { t.margin = true; if (c[7]) t[type === "buy" ? "loan" : "interest"] = +c[7]; } }
     add.push(t);
   });
   if (!add.length) { $("#csvMsg").textContent = "沒有可匯入的資料" + (bad.length ? `（第 ${bad.join(", ")} 行格式錯誤）` : ""); return; }
@@ -597,8 +678,8 @@ $("#csvBtn").onclick = async () => {
 };
 
 $("#csvDaily").onclick = () => {
-  const h = "日期,市值,當日損益,當日報酬,累積損益,累積報酬,加權指數,加權漲跌%,櫃買指數,櫃買漲跌%,交易\n";
-  const b = R.rows.map(r => [r.d, Math.round(r.mv), Math.round(r.pnl), (r.ret * 100).toFixed(3), Math.round(r.cum), (r.twr * 100).toFixed(3), r.taiex ?? "", r.taiexChg == null ? "" : (r.taiexChg * 100).toFixed(3), r.otc ?? "", r.otcChg == null ? "" : (r.otcChg * 100).toFixed(3), `"${r.notes.join("、")}"`].join(",")).join("\n");
+  const h = "日期,市值,融資餘額,淨值,維持率%,當日損益,當日報酬,累積損益,累積報酬,加權指數,加權漲跌%,櫃買指數,櫃買漲跌%,交易\n";
+  const b = R.rows.map(r => [r.d, Math.round(r.mv), Math.round(r.loan), Math.round(r.eq), r.maint == null ? "" : (r.maint * 100).toFixed(1), Math.round(r.pnl), (r.ret * 100).toFixed(3), Math.round(r.cum), (r.twr * 100).toFixed(3), r.taiex ?? "", r.taiexChg == null ? "" : (r.taiexChg * 100).toFixed(3), r.otc ?? "", r.otcChg == null ? "" : (r.otcChg * 100).toFixed(3), `"${r.notes.join("、")}"`].join(",")).join("\n");
   download("每日損益.csv", "﻿" + h + b, "text/csv");
 };
 

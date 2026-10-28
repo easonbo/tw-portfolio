@@ -73,6 +73,10 @@ tbody tr:hover{background:var(--surface-2)}
 .rangesum{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--text-2);margin-bottom:8px}
 .rangesum b{font-weight:500}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-2)}
+#cumLegend button{background:none;border:1px solid transparent;border-radius:6px;padding:2px 6px;margin:-2px -6px;font:inherit;font-size:12px;color:var(--text-2);cursor:pointer}
+#cumLegend button:hover{border-color:var(--border);color:var(--text)}
+#cumLegend button[aria-pressed="false"]{opacity:.45;text-decoration:line-through}
+.rangesum .off{opacity:.45}
 .legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
 form.trade{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;align-items:end}
 label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-2)}
@@ -127,9 +131,10 @@ label.chk input{width:auto;margin:0}
       </div>
       <div class="rangesum" id="cumSummary"></div>
       <div class="legend" id="cumLegend">
-        <span><i style="background:var(--s1)"></i>我的持股（時間加權，從第一筆交易起算）</span>
-        <span><i style="background:var(--s2)"></i>加權指數</span>
-        <span><i style="background:var(--s3)"></i>櫃買指數</span>
+        <button type="button" data-s="p" aria-pressed="true"><i style="background:var(--s1)"></i>我的持股（時間加權，從第一筆交易起算）</button>
+        <button type="button" data-s="t" aria-pressed="true"><i style="background:var(--s2)"></i>加權指數</button>
+        <button type="button" data-s="o" aria-pressed="true"><i style="background:var(--s3)"></i>櫃買指數</button>
+        <span class="hint">點選可隱藏／顯示</span>
       </div>
       <div class="chartbox"><canvas id="cumChart"></canvas></div>
     </div>
@@ -515,18 +520,15 @@ function renderCharts() {
   // 區間摘要
   const lastOf = a => { for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; };
   const sp = v => v == null ? "—" : `<b class="num ${cls(v)}">${v > 0 ? "+" : ""}${v.toFixed(2)}%</b>`;
-  const pnlSum = (rows[0] && rows[0].pnl != null ? rows.slice(1) : rows).reduce((s, r) => s + (r.pnl || 0), 0);
-  const hasPnl = rows.some(r => r.pnl != null);
   $("#cumSummary").innerHTML = rows.length ? `<span>${rows[0].d} ～ ${rows[rows.length - 1].d}・${rows.length} 個交易日</span>` +
-    (trades.length ? `<span>我的持股 ${sp(lastOf(rb.p))}</span>` : "") +
-    `<span>加權 ${sp(lastOf(rb.t))}</span><span>櫃買 ${sp(lastOf(rb.o))}</span>` +
-    (hasPnl ? `<span>區間損益 <b class="num ${cls(pnlSum)}">${sgn(pnlSum)}</b></span>` : "") : "";
+    (trades.length ? `<span class="${hiddenS.has("p") ? "off" : ""}">我的持股 ${sp(lastOf(rb.p))}</span>` : "") +
+    `<span class="${hiddenS.has("t") ? "off" : ""}">加權 ${sp(lastOf(rb.t))}</span><span class="${hiddenS.has("o") ? "off" : ""}">櫃買 ${sp(lastOf(rb.o))}</span>` : "";
   const hasP = trades.length > 0;
   $("#cumLegend").firstElementChild.style.display = hasP ? "" : "none";
   const ds = [];
-  if (hasP) ds.push({ label: "我的持股", data: rb.p, borderColor: css("--s1"), backgroundColor: css("--s1"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.15 });
-  ds.push({ label: "加權指數", data: rb.t, borderColor: css("--s2"), backgroundColor: css("--s2"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.15, spanGaps: true });
-  ds.push({ label: "櫃買指數", data: rb.o, borderColor: css("--s3"), backgroundColor: css("--s3"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.15, spanGaps: true });
+  if (hasP) ds.push({ key: "p", hidden: hiddenS.has("p"), label: "我的持股", data: rb.p, borderColor: css("--s1"), backgroundColor: css("--s1"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.15 });
+  ds.push({ key: "t", hidden: hiddenS.has("t"), label: "加權指數", data: rb.t, borderColor: css("--s2"), backgroundColor: css("--s2"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.15, spanGaps: true });
+  ds.push({ key: "o", hidden: hiddenS.has("o"), label: "櫃買指數", data: rb.o, borderColor: css("--s3"), backgroundColor: css("--s3"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.15, spanGaps: true });
   const o1 = baseOpts(v => v.toFixed(1) + "%");
   o1.plugins.tooltip.callbacks = { title: it => rows[it[0].dataIndex].d, label: c => ` ${c.dataset.label}  ${c.parsed.y == null ? "—" : (c.parsed.y > 0 ? "+" : "") + c.parsed.y.toFixed(2) + "%"}` };
   charts.cum && charts.cum.destroy();
@@ -731,6 +733,19 @@ $("#range").addEventListener("click", e => {
   document.querySelectorAll("#range button").forEach(b => b.classList.toggle("on", b.dataset.r === r));
   renderCharts();
 });
+// 圖例點選：隱藏／顯示線，Y 軸自動依顯示中的線縮放
+const LS_HIDE = "twp_hidden_series";
+const hiddenS = new Set(store.get(LS_HIDE, []));
+function syncLegend() { document.querySelectorAll("#cumLegend button").forEach(b => b.setAttribute("aria-pressed", String(!hiddenS.has(b.dataset.s)))); }
+$("#cumLegend").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-s]"); if (!btn) return;
+  const k = btn.dataset.s;
+  hiddenS.has(k) ? hiddenS.delete(k) : hiddenS.add(k);
+  store.set(LS_HIDE, [...hiddenS]); syncLegend();
+  if (charts.cum) { charts.cum.data.datasets.forEach(d => d.hidden = hiddenS.has(d.key)); charts.cum.update("none"); }
+  document.querySelectorAll("#cumSummary span").length && renderCharts();
+});
+syncLegend();
 function onDateRange() {
   let f = $("#rFrom").value, t = $("#rTo").value;
   if (f && t && f > t) [f, t] = [t, f];

@@ -118,7 +118,7 @@ label.chk input{width:auto;margin:0}
         </span>
       </h2>
       <div class="legend" id="cumLegend">
-        <span><i style="background:var(--s1)"></i>我的持股（時間加權）</span>
+        <span><i style="background:var(--s1)"></i>我的持股（時間加權，從第一筆交易起算）</span>
         <span><i style="background:var(--s2)"></i>加權指數</span>
         <span><i style="background:var(--s3)"></i>櫃買指數</span>
       </div>
@@ -302,11 +302,23 @@ function compute() {
   const pos = {};
   const rows = [];
   let prevEq = 0, cum = 0, twr = 0, realizedAll = 0, divAll = 0, feesAll = 0, interestPaidAll = 0;
-  const baseD = dates[Math.max(0, firstIdx - 1)];
+  const baseD = dates[0];   // 指數累積漲跌從有資料的第一天起算（圖表會再依區間歸零）
   const base = { taiex: (D.index[baseD] || {}).taiex, otc: (D.index[baseD] || {}).otc };
   const tradeInfo = {};   // id -> { cash: 實際進出你帳戶的金額, repaid, interest, loan }
   const allLots = () => Object.values(pos).flatMap(p => p.lots);
 
+  // 第一筆交易之前：只放大盤資料，持股欄位留空
+  for (let i = 0; i < Math.min(firstIdx, dates.length); i++) {
+    const d = dates[i], ix = D.index[d] || {}, pix = D.index[dates[i - 1]] || {};
+    rows.push({
+      d, pre: true, mv: null, eq: null, loan: null, accr: null, maint: null, pnl: null, ret: null, cum: null, twr: null, flow: 0, notes: [],
+      taiex: ix.taiex, otc: ix.otc,
+      taiexChg: ix.taiex && pix.taiex ? ix.taiex / pix.taiex - 1 : null,
+      otcChg: ix.otc && pix.otc ? ix.otc / pix.otc - 1 : null,
+      taiexCum: ix.taiex && base.taiex ? ix.taiex / base.taiex - 1 : null,
+      otcCum: ix.otc && base.otc ? ix.otc / base.otc - 1 : null,
+    });
+  }
   for (let i = firstIdx; i < dates.length; i++) {
     const d = dates[i];
     let flow = 0, buyOwn = 0, realizedToday = 0;
@@ -460,9 +472,9 @@ function rebased(rows) {
   if (!rows.length) return { p: [], t: [], o: [] };
   const i0 = R.rows.indexOf(rows[0]);
   const b = i0 > 0 ? R.rows[i0 - 1] : null;
-  const pb = b ? 1 + b.twr : 1, tb = b ? 1 + (b.taiexCum || 0) : 1, ob = b ? 1 + (b.otcCum || 0) : 1;
+  const pb = b && b.twr != null ? 1 + b.twr : 1, tb = b ? 1 + (b.taiexCum || 0) : 1, ob = b ? 1 + (b.otcCum || 0) : 1;
   return {
-    p: rows.map(r => ((1 + r.twr) / pb - 1) * 100),
+    p: rows.map(r => r.twr == null ? null : ((1 + r.twr) / pb - 1) * 100),
     t: rows.map(r => r.taiexCum == null ? null : ((1 + r.taiexCum) / tb - 1) * 100),
     o: rows.map(r => r.otcCum == null ? null : ((1 + r.otcCum) / ob - 1) * 100),
   };
@@ -679,7 +691,8 @@ $("#csvBtn").onclick = async () => {
 
 $("#csvDaily").onclick = () => {
   const h = "日期,市值,融資餘額,淨值,維持率%,當日損益,當日報酬,累積損益,累積報酬,加權指數,加權漲跌%,櫃買指數,櫃買漲跌%,交易\n";
-  const b = R.rows.map(r => [r.d, Math.round(r.mv), Math.round(r.loan), Math.round(r.eq), r.maint == null ? "" : (r.maint * 100).toFixed(1), Math.round(r.pnl), (r.ret * 100).toFixed(3), Math.round(r.cum), (r.twr * 100).toFixed(3), r.taiex ?? "", r.taiexChg == null ? "" : (r.taiexChg * 100).toFixed(3), r.otc ?? "", r.otcChg == null ? "" : (r.otcChg * 100).toFixed(3), `"${r.notes.join("、")}"`].join(",")).join("\n");
+  const n0 = v => v == null ? "" : Math.round(v), p3 = v => v == null ? "" : (v * 100).toFixed(3);
+  const b = R.rows.map(r => [r.d, n0(r.mv), n0(r.loan), n0(r.eq), r.maint == null ? "" : (r.maint * 100).toFixed(1), n0(r.pnl), p3(r.ret), n0(r.cum), p3(r.twr), r.taiex ?? "", r.taiexChg == null ? "" : (r.taiexChg * 100).toFixed(3), r.otc ?? "", r.otcChg == null ? "" : (r.otcChg * 100).toFixed(3), `"${r.notes.join("、")}"`].join(",")).join("\n");
   download("每日損益.csv", "﻿" + h + b, "text/csv");
 };
 

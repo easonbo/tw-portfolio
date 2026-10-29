@@ -52,6 +52,7 @@ h1{font-size:22px;margin:0;font-weight:700;letter-spacing:.02em}
 .kpi .v{font-size:22px;font-weight:500;margin-top:2px}
 .kpi .d{font-size:12.5px;margin-top:2px;color:var(--text-2)}
 .up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--flat)}
+.kpi .up{color:var(--up)} .kpi .down{color:var(--down)} .kpi .flat{color:var(--flat)}
 nav.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px;overflow-x:auto}
 nav.tabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--text-2);padding:8px 12px;font:inherit;cursor:pointer;white-space:nowrap}
 nav.tabs button.on{color:var(--text);border-bottom-color:var(--accent);font-weight:500}
@@ -485,14 +486,17 @@ function renderKPIs() {
           : `<div class="d">目前無融資部位${R.interestPaidAll ? `・已付利息 ${fmt(R.interestPaidAll)}` : ""}</div>`) + `</div>`);
     }
   }
-  k.push(`<div class="kpi"><div class="l">加權指數</div><div class="v num">${fmt(ix.taiex, 2)}</div><div class="d num ${cls(tChg)}">${sgn(tChg, 2)}　${pct(tChg != null ? tChg / pix.taiex : null)}</div></div>`);
-  k.push(`<div class="kpi"><div class="l">櫃買指數</div><div class="v num">${fmt(ix.otc, 2)}</div><div class="d num ${cls(oChg)}">${sgn(oChg, 2)}　${pct(oChg != null ? oChg / pix.otc : null)}</div></div>`);
+  k.push(`<div class="kpi"><div class="l">加權指數</div><div class="v num ${cls(tChg)}">${fmt(ix.taiex, 2)}</div><div class="d num ${cls(tChg)}">${sgn(tChg, 2)}　${pct(tChg != null ? tChg / pix.taiex : null)}</div></div>`);
+  k.push(`<div class="kpi"><div class="l">櫃買指數</div><div class="v num ${cls(oChg)}">${fmt(ix.otc, 2)}</div><div class="d num ${cls(oChg)}">${sgn(oChg, 2)}　${pct(oChg != null ? oChg / pix.otc : null)}</div></div>`);
   $("#kpis").innerHTML = k.join("");
   const up = D.meta.updated_at ? D.meta.updated_at.replace("T", " ").slice(0, 16) : "—";
+  const offDates = Object.keys(D.index).filter(d => !D.index[d]._live).sort();
+  const offLast = offDates[offDates.length - 1] || "—";
+  const closeTag = `<span title="資料抓取時間 ${up}">收盤資料 <b class="num">${offLast}</b> 13:30</span>`;
   const isLive = R.lastDate && D.index[R.lastDate] && D.index[R.lastDate]._live;
   $("#asof").innerHTML = (isLive
-    ? (inSession() && twNow().hm < 13 * 60 + 31 ? `<span class="livebadge"><i></i>盤中即時</span>` : `<span class="livebadge" style="color:var(--text-2)">今日收盤（即時報價，官方資料稍後更新）</span>`) + ` <b class="num">${R.lastDate} ${live.time || ""}</b>${live.src && live.src !== "mis" ? `<span class="tag">${live.src === "yahoo" ? "Yahoo 備援" : "部分 Yahoo"}</span>` : ""}　·　收盤資料更新於 ${up}`
-    : `資料日期 <b class="num">${R.lastDate || "—"}</b>　·　更新於 ${up}`) + liveNote();
+    ? (inSession() && twNow().hm < 13 * 60 + 31 ? `<span class="livebadge"><i></i>盤中即時</span>` : `<span class="livebadge" style="color:var(--text-2)">今日收盤（即時報價，官方資料稍後更新）</span>`) + ` <b class="num">${R.lastDate} ${live.time || ""}</b>${live.src && live.src !== "mis" ? `<span class="tag">${live.src === "yahoo" ? "Yahoo 備援" : "部分 Yahoo"}</span>` : ""}　·　${closeTag}`
+    : closeTag) + liveNote();
 }
 
 let rangeFrom = "", rangeTo = "";

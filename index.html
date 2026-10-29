@@ -70,6 +70,9 @@ th{color:var(--text-2);font-weight:500;font-size:12px;position:sticky;top:0;back
 td.l,th.l{text-align:left}
 tbody tr:hover{background:var(--surface-2)}
 .daterange{margin:-2px 0 10px}
+.card h2 .seg{margin-left:auto}
+#yearSel{width:auto;padding:3px 8px;font-size:12px;border-radius:8px}
+#yearSel.on{border-color:var(--accent);color:var(--text);font-weight:500}
 .daterange input{width:auto;padding:4px 8px;font-size:13px}
 .rangesum{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--text-2);margin-bottom:8px}
 .rangesum b{font-weight:500}
@@ -136,6 +139,7 @@ label.chk input{width:auto;margin:0}
         <span class="seg" id="range">
           <button data-r="22">1M</button><button data-r="66" class="on">3M</button><button data-r="132">6M</button><button data-r="ytd">YTD</button><button data-r="all">全部</button>
         </span>
+        <select id="yearSel" aria-label="選擇年份"><option value="">年份</option></select>
       </h2>
       <div class="row daterange">
         <input type="date" id="rFrom" aria-label="起始日"><span class="hint">～</span><input type="date" id="rTo" aria-label="終止日">
@@ -502,9 +506,10 @@ function renderKPIs() {
     : closeTag) + liveNote();
 }
 
-let rangeFrom = "", rangeTo = "";
+let rangeFrom = "", rangeTo = "", rangeYear = "";
 function rangeRows() {
   const rows = R.rows;
+  if (range === "year") return rows.filter(r => r.d.slice(0, 4) === rangeYear);
   if (range === "custom") return rows.filter(r => (!rangeFrom || r.d >= rangeFrom) && (!rangeTo || r.d <= rangeTo));
   if (range === "all") return rows;
   if (range === "ytd") { const y = (R.lastDate || "").slice(0, 4); return rows.filter(r => r.d >= y + "-01-01"); }
@@ -515,7 +520,15 @@ function rebased(rows) {
   // 區間起點歸零
   if (!rows.length) return { p: [], t: [], o: [] };
   // 以區間第一天收盤為基準（= 0%）；持股若在區間中途才開始，從第一筆交易那天起算
-  const b = rows[0];
+  // 年份與 YTD：改以「前一年最後一個交易日收盤」為基準，第一天的漲跌也算進去（與一般年度報酬算法一致）
+  let b = rows[0];
+  if (range === "year" || range === "ytd") {
+    const i0 = R.rows.indexOf(rows[0]);
+    if (i0 > 0) {
+      const prev = R.rows[i0 - 1];
+      b = { twr: prev.twr, taiexCum: prev.taiexCum, otcCum: prev.otcCum };
+    }
+  }
   const pb = b.twr != null ? 1 + b.twr : 1, tb = 1 + (b.taiexCum || 0), ob = 1 + (b.otcCum || 0);
   return {
     p: rows.map(r => r.twr == null ? null : ((1 + r.twr) / pb - 1) * 100),
@@ -541,6 +554,13 @@ function renderCharts() {
   const rows = rangeRows();
   const labels = rows.map(r => r.d.slice(5));
   const rb = rebased(rows);
+  // 年份選單：有資料的年份，新到舊
+  const years = [...new Set(R.rows.map(r => r.d.slice(0, 4)))].sort().reverse();
+  const ys = $("#yearSel");
+  const want = `<option value="">年份</option>` + years.map(y => `<option value="${y}">${y} 年</option>`).join("");
+  if (ys.dataset.opts !== years.join()) { ys.innerHTML = want; ys.dataset.opts = years.join(); }
+  ys.value = range === "year" ? rangeYear : "";
+  ys.classList.toggle("on", range === "year");
   // 日期框同步顯示目前區間
   const allD = R.rows.map(r => r.d);
   ["#rFrom", "#rTo"].forEach(id => { $(id).min = allD[0] || ""; $(id).max = allD[allD.length - 1] || ""; });
@@ -548,7 +568,7 @@ function renderCharts() {
   // 區間摘要
   const lastOf = a => { for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; };
   const sp = v => v == null ? "—" : `<b class="num ${cls(v)}">${v > 0 ? "+" : ""}${v.toFixed(2)}%</b>`;
-  $("#cumSummary").innerHTML = rows.length ? `<span>${rows[0].d} ～ ${rows[rows.length - 1].d}・${rows.length} 個交易日</span>` +
+  $("#cumSummary").innerHTML = rows.length ? `<span>${range === "year" ? `<b>${rangeYear} 年</b>・` : ""}${rows[0].d} ～ ${rows[rows.length - 1].d}・${rows.length} 個交易日</span>` +
     (trades.length ? `<span class="${hiddenS.has("p") ? "off" : ""}">我的持股 ${sp(lastOf(rb.p))}</span>` : "") +
     `<span class="${hiddenS.has("t") ? "off" : ""}">加權 ${sp(lastOf(rb.t))}</span><span class="${hiddenS.has("o") ? "off" : ""}">櫃買 ${sp(lastOf(rb.o))}</span>` : "";
   const hasP = trades.length > 0;
@@ -816,6 +836,12 @@ $("#cumLegend").addEventListener("click", e => {
   document.querySelectorAll("#cumSummary span").length && renderCharts();
 });
 syncLegend();
+$("#yearSel").addEventListener("change", e => {
+  const y = e.target.value;
+  if (!y) { range = "all"; document.querySelectorAll("#range button").forEach(b => b.classList.toggle("on", b.dataset.r === "all")); }
+  else { range = "year"; rangeYear = y; document.querySelectorAll("#range button").forEach(b => b.classList.remove("on")); }
+  renderCharts();
+});
 function onDateRange() {
   let f = $("#rFrom").value, t = $("#rTo").value;
   if (f && t && f > t) [f, t] = [t, f];

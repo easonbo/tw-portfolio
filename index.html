@@ -490,11 +490,14 @@ function renderKPIs() {
   k.push(`<div class="kpi"><div class="l">櫃買指數</div><div class="v num ${cls(oChg)}">${fmt(ix.otc, 2)}</div><div class="d num ${cls(oChg)}">${sgn(oChg, 2)}　${pct(oChg != null ? oChg / pix.otc : null)}</div></div>`);
   $("#kpis").innerHTML = k.join("");
   const up = D.meta.updated_at ? D.meta.updated_at.replace("T", " ").slice(0, 16) : "—";
-  const offDates = Object.keys(D.index).filter(d => !D.index[d]._live).sort();
+  const offDates = Object.keys(D.index).filter(d => !D.index[d]._live && !D.index[d]._prov).sort();
   const offLast = offDates[offDates.length - 1] || "—";
   const closeTag = `<span title="資料抓取時間 ${up}">收盤資料 <b class="num">${offLast}</b> 13:30</span>`;
   const isLive = R.lastDate && D.index[R.lastDate] && D.index[R.lastDate]._live;
-  $("#asof").innerHTML = (isLive
+  const isProv = R.lastDate && D.index[R.lastDate] && D.index[R.lastDate]._prov;
+  $("#asof").innerHTML = isProv
+    ? `<span class="livebadge" style="color:#c98500">今日暫估</span> <span class="hint">今天的收盤資料還沒取得，今日交易先以成交價、其他持股以前一日收盤估算</span>　·　${closeTag}` + liveNote()
+    : (isLive
     ? (inSession() && twNow().hm < 13 * 60 + 31 ? `<span class="livebadge"><i></i>盤中即時</span>` : `<span class="livebadge" style="color:var(--text-2)">今日收盤（即時報價，官方資料稍後更新）</span>`) + ` <b class="num">${R.lastDate} ${live.time || ""}</b>${live.src && live.src !== "mis" ? `<span class="tag">${live.src === "yahoo" ? "Yahoo 備援" : "部分 Yahoo"}</span>` : ""}　·　${closeTag}`
     : closeTag) + liveNote();
 }
@@ -629,7 +632,7 @@ function renderDaily() {
   const M = R.usesMargin;
   let html = `<thead><tr><th class="l">日期</th><th>市值</th>${M ? "<th>融資餘額</th><th>淨值</th><th>維持率</th>" : ""}<th>當日損益</th><th>當日報酬</th><th>累積損益</th><th>累積報酬</th><th>加權</th><th>櫃買</th><th class="l">交易</th></tr></thead><tbody>`;
   for (const r of R.rows.slice().reverse()) {
-    html += `<tr><td class="l mono">${r.d}${D.index[r.d] && D.index[r.d]._live ? '<span class="tag m">盤中</span>' : ""}</td><td class="num">${fmt(r.mv)}</td>${M ? `<td class="num">${r.loan ? fmt(r.loan) : "—"}</td><td class="num">${fmt(r.eq)}</td><td class="num ${r.maint != null && r.maint < 1.3 ? "up" : r.maint != null && r.maint < 1.5 ? "warn" : ""}">${r.maint != null ? (r.maint * 100).toFixed(1) + "%" : "—"}</td>` : ""}<td class="num ${cls(r.pnl)}">${sgn(r.pnl)}</td><td class="num ${cls(r.ret)}">${pct(r.ret)}</td>
+    html += `<tr><td class="l mono">${r.d}${D.index[r.d] && D.index[r.d]._live ? '<span class="tag m">即時</span>' : D.index[r.d] && D.index[r.d]._prov ? '<span class="tag">暫估</span>' : ""}</td><td class="num">${fmt(r.mv)}</td>${M ? `<td class="num">${r.loan ? fmt(r.loan) : "—"}</td><td class="num">${fmt(r.eq)}</td><td class="num ${r.maint != null && r.maint < 1.3 ? "up" : r.maint != null && r.maint < 1.5 ? "warn" : ""}">${r.maint != null ? (r.maint * 100).toFixed(1) + "%" : "—"}</td>` : ""}<td class="num ${cls(r.pnl)}">${sgn(r.pnl)}</td><td class="num ${cls(r.ret)}">${pct(r.ret)}</td>
       <td class="num ${cls(r.cum)}">${sgn(r.cum)}</td><td class="num ${cls(r.twr)}">${pct(r.twr)}</td>
       <td class="num ${cls(r.taiexChg)}">${fmt(r.taiex, 2)} <small>${pct(r.taiexChg)}</small></td><td class="num ${cls(r.otcChg)}">${fmt(r.otc, 2)} <small>${pct(r.otcChg)}</small></td>
       <td class="l" style="color:var(--text-2)">${r.notes.join("、")}</td></tr>`;
@@ -673,6 +676,7 @@ async function refresh() {
   }
   await loadStocks();
   applyLive();
+  applyProvisional();
   renderAll();
 }
 
@@ -715,7 +719,7 @@ F.addEventListener("submit", async e => {
   if (editingId) trades = trades.map(x => x.id === editingId ? t : x); else trades.push(t);
   store.set(LS_TRADES, trades);
   resetForm();
-  await loadStocks(); renderAll();
+  await loadStocks(); applyLive(); applyProvisional(); renderAll();
 });
 function resetForm() {
   editingId = null; const d = F.date.value, ty = F.type.value; F.reset(); F.date.value = d || new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Taipei" }); F.type.value = ty;
@@ -751,7 +755,7 @@ $("#importFile").onchange = async e => {
     if (!confirm(`匯入 ${list.length} 筆交易，會取代目前的 ${trades.length} 筆。確定？`)) return;
     trades = list.map(t => Object.assign({ id: uid() }, t)); store.set(LS_TRADES, trades);
     if (j.settings) { S = Object.assign({}, DEFAULT_SET, j.settings); store.set(LS_SET, S); Object.keys(DEFAULT_SET).forEach(k => SF[k].value = S[k]); }
-    await loadStocks(); renderAll(); alert("匯入完成");
+    await loadStocks(); applyLive(); applyProvisional(); renderAll(); alert("匯入完成");
   } catch (err) { alert("匯入失敗：" + err.message); }
   e.target.value = "";
 };
@@ -778,7 +782,7 @@ $("#csvBtn").onclick = async () => {
   trades = trades.concat(add); store.set(LS_TRADES, trades);
   $("#csvMsg").textContent = `已匯入 ${add.length} 筆` + (bad.length ? `，第 ${bad.join(", ")} 行略過` : "");
   $("#csvIn").value = "";
-  await loadStocks(); renderAll();
+  await loadStocks(); applyLive(); applyProvisional(); renderAll();
 };
 
 $("#csvDaily").onclick = () => {
@@ -839,14 +843,38 @@ function twNow() {
   return { date: s.slice(0, 10), hm: +s.slice(11, 13) * 60 + +s.slice(14, 16), dow };
 }
 function inSession() { const n = twNow(); return n.dow >= 1 && n.dow <= 5 && n.hm >= 8 * 60 + 59 && n.hm <= 14 * 60 + 30; }
-function officialHas(d) { return D.index[d] && !D.index[d]._live; }
+function officialHas(d) { return D.index[d] && !D.index[d]._live && !D.index[d]._prov; }
+// 盤中照設定秒數更新；14:30 後若今天官方收盤資料還沒到，每 5 分鐘用即時報價補今天的收盤價
+let lastPollAt = 0;
+function liveDue(force) {
+  if (force) return true;
+  const n = twNow();
+  if (n.dow < 1 || n.dow > 5 || n.hm < 8 * 60 + 59) return false;
+  if (inSession()) return true;
+  return Date.now() - lastPollAt >= 5 * 60 * 1000;
+}
+// 今天有交易、但今天既沒有官方資料也沒有即時報價：用成交價／前一日收盤暫估，交易才不會消失
+function applyProvisional() {
+  // 週末時退到最近的平日（例如週六看到的是週五）
+  const t = new Date(twNow().date + "T12:00:00Z");
+  while (t.getUTCDay() === 0 || t.getUTCDay() === 6) t.setUTCDate(t.getUTCDate() - 1);
+  const today = t.toISOString().slice(0, 10);
+  if (D.index[today]) return false;
+  const dates = Object.keys(D.index).sort();
+  const last = dates[dates.length - 1];
+  if (!last || last >= today) return false;
+  if (!trades.some(t => t.date > last && t.date <= today)) return false;
+  const prev = D.index[last] || {};
+  D.index[today] = { taiex: prev.taiex, otc: prev.otc, _prov: true };
+  return true;
+}
 function liveSyms() {
   const codes = [...new Set(trades.map(t => t.code))];
   return codes.map(c => { const m = (D.names[c] && D.names[c][1]) || (D.stocks[c] && D.stocks[c].m); return (m === "TPEx" ? "otc_" : m === "TWSE" ? "tse_" : "any_") + c; });
 }
 function applyLive() {
   const d = live.date;
-  if (!d || d !== twNow().date || officialHas(d)) return false;
+  if (!d || d !== twNow().date || officialHas(d)) return false;   // 暫估資料會被即時報價取代
   const ix = {};
   if (live.idx.taiex) ix.taiex = live.idx.taiex.p;
   if (live.idx.otc) ix.otc = live.idx.otc.p;
@@ -870,8 +898,8 @@ async function pollLive(force) {
   const today = twNow().date;
   if (!force && document.hidden) return;
   if (!force && officialHas(today)) { if (live.status !== "official") { live.status = "official"; renderKPIs(); } return; }
-  if (!force && !inSession()) { if (live.status !== "idle") { live.status = "idle"; renderKPIs(); } return; }
-  liveBusy = true;
+  if (!liveDue(force)) { if (live.status !== "idle") { live.status = "idle"; renderKPIs(); } return; }
+  liveBusy = true; lastPollAt = Date.now();
   try {
     const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 12000);
     const u = S.liveUrl.replace(/\/+$/, "") + "/?s=" + encodeURIComponent(liveSyms().join(","));

@@ -578,7 +578,7 @@ function renderCharts() {
   const lastOf = a => { for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; };
   const sp = v => v == null ? "—" : `<b class="num ${cls(v)}">${v > 0 ? "+" : ""}${v.toFixed(2)}%</b>`;
   const firstOf = a => { for (const v of a) if (v != null) return v; return null; };
-  const ixLine = (name, key, arr) => { const a = firstOf(arr), z = lastOf(arr); return `<span class="${hiddenS.has(key) ? "off" : ""}">${name} <b class="num">${fmt(a, 2)}</b> → <b class="num">${fmt(z, 2)}</b> ${a && z ? sp((z / a - 1) * 100) : ""}</span>`; };
+  const ixLine = (name, key, arr) => { const a = firstOf(arr), z = lastOf(arr); return `<span class="${hiddenS.has(key) ? "off" : ""}">${name} <b class="num">${fmt(a, 2)}</b> → <b class="num">${fmt(z, 2)}</b> ${a && z ? `<b class="num ${cls(z - a)}">${sgn(z - a, 2)} 點</b>` : ""}</span>`; };
   const head = rows.length ? `<span>${range === "year" ? `<b>${rangeYear} 年</b>・` : ""}${rows[0].d} ～ ${rows[rows.length - 1].d}・${rows.length} 個交易日</span>` : "";
   if (idxMode) $("#cumSummary").innerHTML = rows.length ? head + ixLine("加權", "t", rows.map(r => r.taiex)) + ixLine("櫃買", "o", rows.map(r => r.otc)) : "";
   else $("#cumSummary").innerHTML = rows.length ? head +

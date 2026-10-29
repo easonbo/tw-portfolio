@@ -72,6 +72,17 @@ tbody tr:hover{background:var(--surface-2)}
 .daterange input{width:auto;padding:4px 8px;font-size:13px}
 .rangesum{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--text-2);margin-bottom:8px}
 .rangesum b{font-weight:500}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--text)}
+th.sortable.on{color:var(--text)}
+th.sortable .arr{font-size:10px;margin-left:3px;opacity:.35}
+th.sortable.on .arr{opacity:1;color:var(--accent)}
+.livebadge{display:inline-flex;align-items:center;gap:5px;color:var(--down);font-weight:500}
+.livebadge i{width:7px;height:7px;border-radius:50%;background:currentColor;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion: reduce){.livebadge i{animation:none}}
+.livenote{margin-left:8px;font-size:12px;color:var(--muted)}
+.livenote a{color:var(--accent);cursor:pointer}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-2)}
 #cumLegend button{background:none;border:1px solid transparent;border-radius:6px;padding:2px 6px;margin:-2px -6px;font:inherit;font-size:12px;color:var(--text-2);cursor:pointer}
 #cumLegend button:hover{border-color:var(--border);color:var(--text)}
@@ -199,6 +210,8 @@ label.chk input{width:auto;margin:0}
       <h2>績效與費用設定</h2>
       <form class="trade" id="setForm">
         <label>績效起算日（空白 = 第一筆交易）<input name="trackFrom" type="date"></label>
+        <label>即時報價網址（Cloudflare Worker）<input name="liveUrl" type="url" placeholder="https://tw-quote.xxx.workers.dev"></label>
+        <label>即時更新頻率（秒，最少 10）<input name="liveSec" type="number" min="10" step="1"></label>
         <label>手續費折數（1 = 不打折，0.28 = 2.8 折）<input name="discount" type="number" step="0.01" min="0" max="1"></label>
         <label>最低手續費（元）<input name="minFee" type="number" step="1" min="0"></label>
         <label>股票證交稅<input name="stockTax" type="number" step="0.0001"></label>
@@ -209,6 +222,7 @@ label.chk input{width:auto;margin:0}
         <label>融資成數・上櫃<input name="ratioTPEx" type="number" step="0.1" min="0" max="1"></label>
         <div><button class="btn primary" type="submit">儲存</button></div>
       </form>
+      <p class="hint">即時報價：盤中（週一至五 09:00–14:30）網頁開著時，每隔設定的秒數向你的 Worker 取得持股與大盤的即時價格，當作今天的資料計算損益；官方收盤資料抓到之後自動改用官方資料。網頁切到背景時會暫停。<button type="button" class="btn sm" id="liveTest">測試連線</button> <span class="hint" id="liveTestMsg"></span></p>
       <p class="hint">績效起算日：這天之前的持股當作期初持股，以前一個交易日收盤為起點，累積損益、報酬率、每日損益都從這天開始算；均價與未實現/已實現損益仍以實際成本計算。</p>
       <p class="hint">手續費 = 成交金額 × 0.1425% × 折數（無條件捨去，不足最低收最低）；證交稅只在賣出收取。代號 00 開頭視為 ETF，00 開頭且 B 結尾視為債券 ETF。個別交易填了手續費/稅就以你填的為準。</p>
       <p class="hint">融資：融資金額 = 成交金額 × 成數，千元以下捨去；利息 = 融資金額 × 年利率 × 日曆天數 ÷ 365，每天估算計入損益，償還當天以實際利息校正（融資賣出時可填對帳單上的利息）。擔保維持率 = 融資股票市值 ÷ 融資餘額。</p>
@@ -235,7 +249,7 @@ label.chk input{width:auto;margin:0}
 "use strict";
 // ============================================================ 狀態
 const LS_TRADES = "twp_trades_v1", LS_SET = "twp_settings_v1", LS_THEME = "twp_theme";
-const DEFAULT_SET = { trackFrom: "", discount: 1, minFee: 20, stockTax: 0.003, etfTax: 0.001, bondEtfTax: 0, marginRate: 0.065, ratioTWSE: 0.6, ratioTPEx: 0.5 };
+const DEFAULT_SET = { liveUrl: "", liveSec: 15, trackFrom: "", discount: 1, minFee: 20, stockTax: 0.003, etfTax: 0.001, bondEtfTax: 0, marginRate: 0.065, ratioTWSE: 0.6, ratioTPEx: 0.5 };
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { alert("無法寫入瀏覽器儲存空間：" + e.message); } }
@@ -292,7 +306,7 @@ async function loadBase() {
   dl.appendChild(frag);
 }
 async function loadStocks() {
-  const codes = [...new Set(trades.map(t => t.code))].filter(c => !D.stocks[c]);
+  const codes = [...new Set(trades.map(t => t.code))].filter(c => !D.stocks[c] || D.stocks[c].liveOnly);
   await Promise.all(codes.map(c => getJSON("data/stocks/" + encodeURIComponent(c) + ".json").then(j => D.stocks[c] = j).catch(() => D.stocks[c] = { c, n: "", d: {}, missing: true })));
 }
 
@@ -422,7 +436,7 @@ function compute() {
     return { code: c, name: nameOf(c), shares: p.shares, mShares: p.mShares, loan, avg: p.cost / p.shares, cost: p.cost, last: p.last, prev: p.prev,
       dayChg, dayPct: dayChg != null && p.prev ? dayChg / p.prev : null, mv, unreal: mv - p.cost, unrealPct: p.cost ? (mv - p.cost) / p.cost : null,
       own: p.cost - loan, ownPct: p.cost - loan ? (mv - p.cost) / (p.cost - loan) : null,
-      stale: !(D.stocks[c] && D.stocks[c].d[lastDate]), missing: D.stocks[c] && D.stocks[c].missing };
+      stale: !(D.stocks[c] && D.stocks[c].d[lastDate]), missing: D.stocks[c] && D.stocks[c].missing && !Object.keys(D.stocks[c].d).length };
   }).sort((a, b) => b.mv - a.mv);
   const totalMV = holdings.reduce((s, h) => s + h.mv, 0);
   holdings.forEach(h => h.w = totalMV ? h.mv / totalMV : 0);
@@ -475,7 +489,10 @@ function renderKPIs() {
   k.push(`<div class="kpi"><div class="l">櫃買指數</div><div class="v num">${fmt(ix.otc, 2)}</div><div class="d num ${cls(oChg)}">${sgn(oChg, 2)}　${pct(oChg != null ? oChg / pix.otc : null)}</div></div>`);
   $("#kpis").innerHTML = k.join("");
   const up = D.meta.updated_at ? D.meta.updated_at.replace("T", " ").slice(0, 16) : "—";
-  $("#asof").innerHTML = `資料日期 <b class="num">${R.lastDate || "—"}</b>　·　更新於 ${up}`;
+  const isLive = R.lastDate && D.index[R.lastDate] && D.index[R.lastDate]._live;
+  $("#asof").innerHTML = (isLive
+    ? (inSession() && twNow().hm < 13 * 60 + 31 ? `<span class="livebadge"><i></i>盤中即時</span>` : `<span class="livebadge" style="color:var(--text-2)">今日收盤（即時報價，官方資料稍後更新）</span>`) + ` <b class="num">${R.lastDate} ${live.time || ""}</b>${live.src && live.src !== "mis" ? `<span class="tag">${live.src === "yahoo" ? "Yahoo 備援" : "部分 Yahoo"}</span>` : ""}　·　收盤資料更新於 ${up}`
+    : `資料日期 <b class="num">${R.lastDate || "—"}</b>　·　更新於 ${up}`) + liveNote();
 }
 
 let rangeFrom = "", rangeTo = "";
@@ -547,29 +564,68 @@ function renderCharts() {
   $("#pnlChart").closest(".card").style.display = hasP ? "" : "none";
 }
 
+// 持股表可排序：點表頭切換 高→低 / 低→高
+const LS_SORT = "twp_hold_sort";
+let holdSort = store.get(LS_SORT, { key: "mv", dir: -1 });
+const HOLD_COLS = [
+  { k: "code", t: "代號", l: true, v: x => x.code, text: true },
+  { k: "name", t: "名稱", l: true, v: x => x.name || "", text: true },
+  { k: "shares", t: "股數", v: x => x.shares },
+  { k: "avg", t: "均價", v: x => x.avg },
+  { k: "last", t: "收盤", v: x => x.last },
+  { k: "dayPct", t: "漲跌", v: x => x.dayPct },
+  { k: "dayPnl", t: "今日損益", v: x => x.dayPnl },
+  { k: "mv", t: "市值", v: x => x.mv },
+  { k: "loan", t: "融資餘額", v: x => x.loan || null, m: true },
+  { k: "unreal", t: "未實現損益", v: x => x.unreal },
+  { k: "unrealPct", t: "報酬率", v: x => x.unrealPct },
+  { k: "ownPct", t: "自備報酬", v: x => x.loan ? x.ownPct : null, m: true },
+  { k: "w", t: "權重", v: x => x.w },
+];
 function renderHoldings() {
-  const h = R.holdings;
-  if (!trades.length) { $("#holdTable").innerHTML = `<tr><td class="l" style="color:var(--text-2);white-space:normal">還沒有交易紀錄。到「交易紀錄」分頁新增買進，或在「設定與備份」用 CSV 一次匯入。</td></tr>`; $("#holdHint").textContent = ""; return; }
   const M = R.usesMargin;
-  let html = `<thead><tr><th class="l">代號</th><th class="l">名稱</th><th>股數</th><th>均價</th><th>收盤</th><th>漲跌</th><th>今日損益</th><th>市值</th>${M ? "<th>融資餘額</th>" : ""}<th>未實現損益</th><th>報酬率</th>${M ? "<th>自備報酬</th>" : ""}<th>權重</th></tr></thead><tbody>`;
+  if (!trades.length) { $("#holdTable").innerHTML = `<tr><td class="l" style="color:var(--text-2);white-space:normal">還沒有交易紀錄。到「交易紀錄」分頁新增買進，或在「設定與備份」用 CSV 一次匯入。</td></tr>`; $("#holdHint").textContent = ""; return; }
+  const cols = HOLD_COLS.filter(c => !c.m || M);
+  const col = cols.find(c => c.k === holdSort.key) || cols.find(c => c.k === "mv");
+  const h = R.holdings.slice().sort((a, b) => {
+    const va = col.v(a), vb = col.v(b);
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;            // 空值永遠排最後
+    if (vb == null) return -1;
+    const r = col.text ? String(va).localeCompare(String(vb), "zh-Hant") : va - vb;
+    return r * holdSort.dir;
+  });
+  let html = `<thead><tr>${cols.map(c => {
+    const on = c.k === col.k;
+    return `<th class="sortable${c.l ? " l" : ""}${on ? " on" : ""}" data-sort="${c.k}" title="點選排序" aria-sort="${on ? (holdSort.dir > 0 ? "ascending" : "descending") : "none"}">${c.t}<span class="arr">${on ? (holdSort.dir > 0 ? "▲" : "▼") : "↕"}</span></th>`;
+  }).join("")}</tr></thead><tbody>`;
   for (const x of h) {
     html += `<tr><td class="l mono">${x.code}</td><td class="l">${x.name || ""}${x.missing ? '<span class="tag">無資料</span>' : x.stale ? '<span class="tag">今日無成交</span>' : ""}</td>
       <td class="num">${fmt(x.shares)}${x.mShares ? `<span class="tag m">資 ${fmt(x.mShares)}</span>` : ""}</td><td class="num">${fmt(x.avg, 2)}</td><td class="num">${fmt(x.last, 2)}</td>
       <td class="num ${cls(x.dayChg)}">${x.dayChg == null ? "—" : sgn(x.dayChg, 2) + " " + pct(x.dayPct)}</td>
       <td class="num ${cls(x.dayPnl)}">${x.dayPnl == null ? "—" : sgn(x.dayPnl)}</td>
-      <td class="num">${fmt(x.mv)}</td>${M ? `<td class="num">${x.loan ? fmt(x.loan) : "—"}</td>` : ""}<td class="num ${cls(x.unreal)}">${sgn(x.unreal)}</td><td class="num ${cls(x.unrealPct)}">${pct(x.unrealPct)}</td>${M ? `<td class="num ${cls(x.ownPct)}">${x.loan ? pct(x.ownPct) : "—"}</td>` : ""}<td class="num">${(x.w * 100).toFixed(1)}%</td></tr>`;
+      <td class="num">${fmt(x.mv)}</td>${M ? `<td class="num">${x.loan ? fmt(x.loan) : "—"}</td>` : ""}<td class="num ${cls(x.unreal)}">${sgn(x.unreal)}</td><td class="num ${cls(x.unrealPct)}">${pct(x.unrealPct)}</td>${M ? `<td class="num ${x.loan ? cls(x.ownPct) : ""}">${x.loan ? pct(x.ownPct) : "—"}</td>` : ""}<td class="num">${(x.w * 100).toFixed(1)}%</td></tr>`;
   }
   const cost = h.reduce((s, x) => s + x.cost, 0);
-  html += `</tbody><tfoot><tr><th class="l" colspan="7">合計</th><th class="num">${fmt(R.totalMV)}</th>${M ? `<th class="num">${fmt(R.loanAll)}</th>` : ""}<th class="num ${cls(R.unrealAll)}">${sgn(R.unrealAll)}</th><th class="num ${cls(R.unrealAll)}">${pct(cost ? R.unrealAll / cost : null)}</th>${M ? "<th></th>" : ""}<th>100%</th></tr></tfoot>`;
+  const dayAll = h.reduce((s, x) => s + (x.dayPnl || 0), 0), anyDay = h.some(x => x.dayPnl != null);
+  html += `</tbody><tfoot><tr><th class="l" colspan="6">合計</th><th class="num ${cls(dayAll)}">${anyDay ? sgn(dayAll) : ""}</th><th class="num">${fmt(R.totalMV)}</th>${M ? `<th class="num">${fmt(R.loanAll)}</th>` : ""}<th class="num ${cls(R.unrealAll)}">${sgn(R.unrealAll)}</th><th class="num ${cls(R.unrealAll)}">${pct(cost ? R.unrealAll / cost : null)}</th>${M ? "<th></th>" : ""}<th>100%</th></tr></tfoot>`;
   $("#holdTable").innerHTML = html;
   $("#holdHint").textContent = `均價含買進手續費・已實現（含股利）${sgn(R.realizedAll)}・累計費稅 ${fmt(R.feesAll)}` + (R.interestPaidAll ? `・已付融資利息 ${fmt(R.interestPaidAll)}` : "") + (M ? "・自備報酬 = 未實現 ÷（成本 − 融資）" : "") + (R.pending.length ? `・${R.pending.length} 筆交易待收盤資料` : "");
 }
+$("#holdTable").addEventListener("click", e => {
+  const th = e.target.closest("th[data-sort]"); if (!th) return;
+  const k = th.dataset.sort, c = HOLD_COLS.find(x => x.k === k);
+  // 同一欄再點一次反轉；換欄時數字欄先高→低，文字欄先 A→Z
+  holdSort = holdSort.key === k ? { key: k, dir: -holdSort.dir } : { key: k, dir: c.text ? 1 : -1 };
+  store.set(LS_SORT, holdSort);
+  renderHoldings();
+});
 
 function renderDaily() {
   const M = R.usesMargin;
   let html = `<thead><tr><th class="l">日期</th><th>市值</th>${M ? "<th>融資餘額</th><th>淨值</th><th>維持率</th>" : ""}<th>當日損益</th><th>當日報酬</th><th>累積損益</th><th>累積報酬</th><th>加權</th><th>櫃買</th><th class="l">交易</th></tr></thead><tbody>`;
   for (const r of R.rows.slice().reverse()) {
-    html += `<tr><td class="l mono">${r.d}</td><td class="num">${fmt(r.mv)}</td>${M ? `<td class="num">${r.loan ? fmt(r.loan) : "—"}</td><td class="num">${fmt(r.eq)}</td><td class="num ${r.maint != null && r.maint < 1.3 ? "up" : r.maint != null && r.maint < 1.5 ? "warn" : ""}">${r.maint != null ? (r.maint * 100).toFixed(1) + "%" : "—"}</td>` : ""}<td class="num ${cls(r.pnl)}">${sgn(r.pnl)}</td><td class="num ${cls(r.ret)}">${pct(r.ret)}</td>
+    html += `<tr><td class="l mono">${r.d}${D.index[r.d] && D.index[r.d]._live ? '<span class="tag m">盤中</span>' : ""}</td><td class="num">${fmt(r.mv)}</td>${M ? `<td class="num">${r.loan ? fmt(r.loan) : "—"}</td><td class="num">${fmt(r.eq)}</td><td class="num ${r.maint != null && r.maint < 1.3 ? "up" : r.maint != null && r.maint < 1.5 ? "warn" : ""}">${r.maint != null ? (r.maint * 100).toFixed(1) + "%" : "—"}</td>` : ""}<td class="num ${cls(r.pnl)}">${sgn(r.pnl)}</td><td class="num ${cls(r.ret)}">${pct(r.ret)}</td>
       <td class="num ${cls(r.cum)}">${sgn(r.cum)}</td><td class="num ${cls(r.twr)}">${pct(r.twr)}</td>
       <td class="num ${cls(r.taiexChg)}">${fmt(r.taiex, 2)} <small>${pct(r.taiexChg)}</small></td><td class="num ${cls(r.otcChg)}">${fmt(r.otc, 2)} <small>${pct(r.otcChg)}</small></td>
       <td class="l" style="color:var(--text-2)">${r.notes.join("、")}</td></tr>`;
@@ -612,6 +668,7 @@ async function refresh() {
     $("#notice").classList.remove("hidden");
   }
   await loadStocks();
+  applyLive();
   renderAll();
 }
 
@@ -677,7 +734,7 @@ $("#tradeTable").addEventListener("click", e => {
 // ============================================================ 設定 / 匯入匯出
 const SF = $("#setForm");
 Object.keys(DEFAULT_SET).forEach(k => SF[k].value = S[k]);
-SF.addEventListener("submit", e => { e.preventDefault(); Object.keys(DEFAULT_SET).forEach(k => S[k] = typeof DEFAULT_SET[k] === "string" ? SF[k].value : +SF[k].value); store.set(LS_SET, S); renderAll(); alert("已儲存"); });
+SF.addEventListener("submit", e => { e.preventDefault(); Object.keys(DEFAULT_SET).forEach(k => S[k] = typeof DEFAULT_SET[k] === "string" ? SF[k].value : +SF[k].value); store.set(LS_SET, S); scheduleLive(); pollLive(false); renderAll(); alert("已儲存"); });
 
 function download(name, text, type) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
 $("#exportBtn").onclick = () => download(`持股交易備份_${new Date().toLocaleDateString("sv-SE")}.json`, JSON.stringify({ version: 1, settings: S, trades }, null, 1), "application/json");
@@ -769,8 +826,90 @@ $("#themeBtn").onclick = () => {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => renderCharts());
 $("#reloadBtn").onclick = () => { D.stocks = {}; refresh(); };
 
+// ============================================================ 盤中即時報價
+let live = { date: null, time: null, quotes: {}, idx: {}, src: null, status: "off", err: "" };
+let liveTimer = null, liveBusy = false;
+function twNow() {
+  const s = new Date().toLocaleString("sv-SE", { timeZone: "Asia/Taipei" });   // "2026-10-29 09:47:12"
+  const dow = new Date(s.slice(0, 10) + "T12:00:00Z").getUTCDay();
+  return { date: s.slice(0, 10), hm: +s.slice(11, 13) * 60 + +s.slice(14, 16), dow };
+}
+function inSession() { const n = twNow(); return n.dow >= 1 && n.dow <= 5 && n.hm >= 8 * 60 + 59 && n.hm <= 14 * 60 + 30; }
+function officialHas(d) { return D.index[d] && !D.index[d]._live; }
+function liveSyms() {
+  const codes = [...new Set(trades.map(t => t.code))];
+  return codes.map(c => { const m = (D.names[c] && D.names[c][1]) || (D.stocks[c] && D.stocks[c].m); return (m === "TPEx" ? "otc_" : m === "TWSE" ? "tse_" : "any_") + c; });
+}
+function applyLive() {
+  const d = live.date;
+  if (!d || d !== twNow().date || officialHas(d)) return false;
+  const ix = {};
+  if (live.idx.taiex) ix.taiex = live.idx.taiex.p;
+  if (live.idx.otc) ix.otc = live.idx.otc.p;
+  D.index[d] = Object.assign(ix, { _live: true });
+  for (const [c, q] of Object.entries(live.quotes)) {
+    if (!D.stocks[c]) D.stocks[c] = { c, n: q.n || "", m: q.ex === "otc" ? "TPEx" : "TWSE", d: {}, liveOnly: true };
+    if (!D.stocks[c].d[d] || D.stocks[c]._liveDate === d) { D.stocks[c].d[d] = q.p; D.stocks[c]._liveDate = d; }
+  }
+  return true;
+}
+function liveNote() {
+  if (!S.liveUrl) return `<span class="livenote">・<a id="liveSetup">設定盤中即時報價</a></span>`;
+  if (live.status === "error") return `<span class="livenote" title="${live.err}">・即時報價連線失敗，稍後重試</span>`;
+  if (live.status === "official") return `<span class="livenote">・今日已收盤（官方資料）</span>`;
+  if (live.status === "idle") return live.date === twNow().date ? "" : `<span class="livenote">・非盤中時段</span>`;
+  if (live.status === "closed") return `<span class="livenote">・今日休市</span>`;
+  return "";
+}
+async function pollLive(force) {
+  if (!S.liveUrl || liveBusy) { if (!S.liveUrl) live.status = "off"; return; }
+  const today = twNow().date;
+  if (!force && document.hidden) return;
+  if (!force && officialHas(today)) { if (live.status !== "official") { live.status = "official"; renderKPIs(); } return; }
+  if (!force && !inSession()) { if (live.status !== "idle") { live.status = "idle"; renderKPIs(); } return; }
+  liveBusy = true;
+  try {
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 12000);
+    const u = S.liveUrl.replace(/\/+$/, "") + "/?s=" + encodeURIComponent(liveSyms().join(","));
+    const r = await fetch(u, { cache: "no-store", signal: ctl.signal });
+    clearTimeout(to);
+    const js = await r.json();
+    if (!r.ok || js.error) throw new Error(js.error || ("HTTP " + r.status));
+    if (js.date !== today) { live = { ...live, status: "closed" }; renderKPIs(); return js; }
+    if (officialHas(today)) { live.status = "official"; renderKPIs(); return js; }
+    live = { date: js.date, time: js.time, quotes: js.quotes || {}, idx: js.idx || {}, src: js.src, status: "ok", err: "" };
+    if (applyLive()) renderAll(); else renderKPIs();
+    return js;
+  } catch (e) {
+    live.status = "error"; live.err = e.name === "AbortError" ? "逾時" : e.message; renderKPIs();
+    if (force) throw e;
+  } finally { liveBusy = false; }
+}
+function scheduleLive() {
+  clearInterval(liveTimer);
+  if (!S.liveUrl) return;
+  liveTimer = setInterval(() => pollLive(false), Math.max(10, +S.liveSec || 15) * 1000);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) pollLive(false); });
+document.addEventListener("click", e => {
+  if (e.target.id === "liveSetup") { document.querySelector('#tabs button[data-t="settings"]').click(); SF.liveUrl.focus(); }
+});
+$("#liveTest").onclick = async () => {
+  const msg = $("#liveTestMsg");
+  const url = SF.liveUrl.value.trim();
+  if (!url) { msg.textContent = "請先填網址"; return; }
+  const keep = S.liveUrl; S.liveUrl = url; msg.textContent = "連線中…";
+  try {
+    const js = await pollLive(true);
+    if (!js) throw new Error("請稍後再試");
+    const n = Object.keys(js.quotes || {}).length;
+    msg.innerHTML = `✓ 連線成功・資料時間 ${js.date} ${js.time || ""}・加權 ${js.idx && js.idx.taiex ? fmt(js.idx.taiex.p, 2) : "—"}・取得 ${n} 檔` + (js.missing && js.missing.length ? `・找不到：${js.missing.join("、")}` : "") + (js.date !== twNow().date ? "（今天不是交易日或尚未開盤）" : "");
+  } catch (e) { msg.textContent = "✗ 連線失敗：" + (e.name === "AbortError" ? "逾時" : e.message); }
+  finally { S.liveUrl = keep; }
+};
+
 resetForm();
-refresh();
+refresh().then(() => { scheduleLive(); pollLive(false); });
 // 開著的分頁在收盤資料更新後（台灣時間 14:00–20:00）每 30 分鐘自動重抓
 setInterval(() => { const h = +new Date().toLocaleString("en-US", { timeZone: "Asia/Taipei", hour: "numeric", hour12: false }); if (h >= 14 && h <= 20 && !document.hidden) { D.stocks = {}; refresh(); } }, 30 * 60 * 1000);
 </script>

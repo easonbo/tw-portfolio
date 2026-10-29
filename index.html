@@ -70,7 +70,8 @@ th{color:var(--text-2);font-weight:500;font-size:12px;position:sticky;top:0;back
 td.l,th.l{text-align:left}
 tbody tr:hover{background:var(--surface-2)}
 .daterange{margin:-2px 0 10px}
-.card h2 .seg{margin-left:auto}
+.card h2 #viewMode{margin-left:8px}
+.card h2 #range{margin-left:auto}
 #yearSel{width:auto;padding:3px 8px;font-size:12px;border-radius:8px}
 #yearSel.on{border-color:var(--accent);color:var(--text);font-weight:500}
 .daterange input{width:auto;padding:4px 8px;font-size:13px}
@@ -135,7 +136,8 @@ label.chk input{width:auto;margin:0}
   <!-- 總覽 -->
   <section data-p="overview">
     <div class="card">
-      <h2>累積報酬 vs 大盤
+      <h2><span id="cumTitle">累積報酬 vs 大盤</span>
+        <span class="seg" id="viewMode"><button data-v="ret" class="on">報酬</button><button data-v="idx">指數</button></span>
         <span class="seg" id="range">
           <button data-r="22">1M</button><button data-r="66" class="on">3M</button><button data-r="132">6M</button><button data-r="ytd">YTD</button><button data-r="all">全部</button>
         </span>
@@ -148,8 +150,8 @@ label.chk input{width:auto;margin:0}
       <div class="rangesum" id="cumSummary"></div>
       <div class="legend" id="cumLegend">
         <button type="button" data-s="p" aria-pressed="true"><i style="background:var(--s1)"></i><span id="legendP">我的持股</span></button>
-        <button type="button" data-s="t" aria-pressed="true"><i style="background:var(--s2)"></i>加權指數</button>
-        <button type="button" data-s="o" aria-pressed="true"><i style="background:var(--s3)"></i>櫃買指數</button>
+        <button type="button" data-s="t" aria-pressed="true"><i style="background:var(--s2)"></i>加權指數<span class="axisTag"></span></button>
+        <button type="button" data-s="o" aria-pressed="true"><i style="background:var(--s3)"></i>櫃買指數<span class="axisTag"></span></button>
         <span class="hint">點選可隱藏／顯示</span>
       </div>
       <div class="chartbox"><canvas id="cumChart"></canvas></div>
@@ -507,6 +509,7 @@ function renderKPIs() {
 }
 
 let rangeFrom = "", rangeTo = "", rangeYear = "";
+let viewMode = store.get("twp_view_mode", "ret");
 function rangeRows() {
   const rows = R.rows;
   if (range === "year") return rows.filter(r => r.d.slice(0, 4) === rangeYear);
@@ -554,6 +557,12 @@ function renderCharts() {
   const rows = rangeRows();
   const labels = rows.map(r => r.d.slice(5));
   const rb = rebased(rows);
+  const idxMode = viewMode === "idx";
+  document.querySelectorAll("#viewMode button").forEach(b => b.classList.toggle("on", b.dataset.v === viewMode));
+  $("#cumTitle").textContent = idxMode ? "加權 vs 櫃買指數" : "累積報酬 vs 大盤";
+  $("#rangeHint").textContent = idxMode ? "選日期即可自訂區間" : "選日期即可自訂區間，以起始日收盤為 0%";
+  const tags = document.querySelectorAll("#cumLegend .axisTag");
+  tags[0].textContent = idxMode ? "（左軸）" : ""; tags[1].textContent = idxMode ? "（右軸）" : "";
   // 年份選單：有資料的年份，新到舊
   const years = [...new Set(R.rows.map(r => r.d.slice(0, 4)))].sort().reverse();
   const ys = $("#yearSel");
@@ -568,18 +577,40 @@ function renderCharts() {
   // 區間摘要
   const lastOf = a => { for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; };
   const sp = v => v == null ? "—" : `<b class="num ${cls(v)}">${v > 0 ? "+" : ""}${v.toFixed(2)}%</b>`;
-  $("#cumSummary").innerHTML = rows.length ? `<span>${range === "year" ? `<b>${rangeYear} 年</b>・` : ""}${rows[0].d} ～ ${rows[rows.length - 1].d}・${rows.length} 個交易日</span>` +
+  const firstOf = a => { for (const v of a) if (v != null) return v; return null; };
+  const ixLine = (name, key, arr) => { const a = firstOf(arr), z = lastOf(arr); return `<span class="${hiddenS.has(key) ? "off" : ""}">${name} <b class="num">${fmt(a, 2)}</b> → <b class="num">${fmt(z, 2)}</b> ${a && z ? sp((z / a - 1) * 100) : ""}</span>`; };
+  const head = rows.length ? `<span>${range === "year" ? `<b>${rangeYear} 年</b>・` : ""}${rows[0].d} ～ ${rows[rows.length - 1].d}・${rows.length} 個交易日</span>` : "";
+  if (idxMode) $("#cumSummary").innerHTML = rows.length ? head + ixLine("加權", "t", rows.map(r => r.taiex)) + ixLine("櫃買", "o", rows.map(r => r.otc)) : "";
+  else $("#cumSummary").innerHTML = rows.length ? head +
     (trades.length ? `<span class="${hiddenS.has("p") ? "off" : ""}">我的持股 ${sp(lastOf(rb.p))}</span>` : "") +
     `<span class="${hiddenS.has("t") ? "off" : ""}">加權 ${sp(lastOf(rb.t))}</span><span class="${hiddenS.has("o") ? "off" : ""}">櫃買 ${sp(lastOf(rb.o))}</span>` : "";
   const hasP = trades.length > 0;
-  $("#cumLegend").firstElementChild.style.display = hasP ? "" : "none";
+  $("#cumLegend").firstElementChild.style.display = hasP && !idxMode ? "" : "none";
   $("#legendP").textContent = `我的持股（時間加權，${S.trackFrom ? S.trackFrom.replace(/-/g, "/") + " 起算" : "從第一筆交易起算"}）`;
   const ds = [];
   if (hasP) ds.push({ key: "p", hidden: hiddenS.has("p"), label: "我的持股", data: rb.p, borderColor: css("--s1"), backgroundColor: css("--s1"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.15 });
   ds.push({ key: "t", hidden: hiddenS.has("t"), label: "加權指數", data: rb.t, borderColor: css("--s2"), backgroundColor: css("--s2"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.15, spanGaps: true });
   ds.push({ key: "o", hidden: hiddenS.has("o"), label: "櫃買指數", data: rb.o, borderColor: css("--s3"), backgroundColor: css("--s3"), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.15, spanGaps: true });
-  const o1 = baseOpts(v => v.toFixed(1) + "%");
-  o1.plugins.tooltip.callbacks = { title: it => rows[it[0].dataIndex].d, label: c => ` ${c.dataset.label}  ${c.parsed.y == null ? "—" : (c.parsed.y > 0 ? "+" : "") + c.parsed.y.toFixed(2) + "%"}` };
+  let o1;
+  if (idxMode) {
+    // 指數模式：加權用左軸、櫃買用右軸，顯示原始點數
+    ds.length = 0;
+    const line = { borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.15, spanGaps: true };
+    ds.push({ ...line, key: "t", hidden: hiddenS.has("t"), label: "加權指數", yAxisID: "y", data: rows.map(r => r.taiex ?? null), borderColor: css("--s2"), backgroundColor: css("--s2") });
+    ds.push({ ...line, key: "o", hidden: hiddenS.has("o"), label: "櫃買指數", yAxisID: "y1", data: rows.map(r => r.otc ?? null), borderColor: css("--s3"), backgroundColor: css("--s3") });
+    o1 = baseOpts(v => v.toLocaleString("zh-TW", { maximumFractionDigits: 0 }));
+    const yl = o1.scales.y;
+    yl.display = "auto"; yl.position = "left";
+    yl.title = { display: true, text: "加權（左）", color: css("--text-2"), font: { size: 11 } };
+    o1.scales.y1 = { ...yl, position: "right", grid: { drawOnChartArea: false }, title: { ...yl.title, text: "櫃買（右）" },
+      ticks: { ...yl.ticks, callback: v => v.toLocaleString("zh-TW", { maximumFractionDigits: 1 }) } };
+    o1.plugins.tooltip.callbacks = { title: it => rows[it[0].dataIndex].d, label: c => {
+      const r = rows[c.dataIndex], chg = c.dataset.key === "t" ? r.taiexChg : r.otcChg;
+      return ` ${c.dataset.label}  ${c.parsed.y == null ? "—" : fmt(c.parsed.y, 2)}${chg != null ? "（當日 " + pct(chg) + "）" : ""}`; } };
+  } else {
+    o1 = baseOpts(v => v.toFixed(1) + "%");
+    o1.plugins.tooltip.callbacks = { title: it => rows[it[0].dataIndex].d, label: c => ` ${c.dataset.label}  ${c.parsed.y == null ? "—" : (c.parsed.y > 0 ? "+" : "") + c.parsed.y.toFixed(2) + "%"}` };
+  }
   charts.cum && charts.cum.destroy();
   charts.cum = new Chart($("#cumChart"), { type: "line", data: { labels, datasets: ds }, options: o1 });
 
@@ -836,6 +867,10 @@ $("#cumLegend").addEventListener("click", e => {
   document.querySelectorAll("#cumSummary span").length && renderCharts();
 });
 syncLegend();
+$("#viewMode").addEventListener("click", e => {
+  const v = e.target.dataset.v; if (!v || v === viewMode) return;
+  viewMode = v; store.set("twp_view_mode", v); renderCharts();
+});
 $("#yearSel").addEventListener("change", e => {
   const y = e.target.value;
   if (!y) { range = "all"; document.querySelectorAll("#range button").forEach(b => b.classList.toggle("on", b.dataset.r === "all")); }
